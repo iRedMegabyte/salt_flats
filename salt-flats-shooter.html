@@ -418,18 +418,20 @@ const SCRAP_CAP=100000000,ARMOR_SLOTS=['head','chest','arms','waist','legs','fee
 const SLOTLBL={head:'Head',chest:'Chest',arms:'Arms',waist:'Waist',legs:'Legs',feet:'Feet',artifact:'Artifact'};
 // Generic item-slot gear can stack in the backpack, while true equipment (weapons, armor, companions) remains single-instance.
 const ITEMS={
- medkit:{name:'Medkit',slot:'item',max:999,desc:'Restores 35 health.',use(){if(P.hp>=maxHp()){toast('Health is full');return false}setHp(P.hp+35);return true}},
- boost:{name:'Overcharge',slot:'item',max:999,desc:'Doubles fire rate for 8s.',use(){boostT=8;toast('Overcharge active');return true}},
- blaster:{name:'Pulse Blaster',slot:'weapon',dmg:1,rate:.17,desc:'Reliable sidearm.'},
- smg:{name:'Rapid SMG',slot:'weapon',dmg:.6,rate:.08,desc:'Fast and light.'},
- rifle:{name:'Heavy Rifle',slot:'weapon',dmg:2,rate:.38,desc:'One-shot drones.'},
- helm:{name:'Scout Helm',slot:'head',armor:2},vest:{name:'Dune Vest',slot:'chest',armor:4},
- gloves:{name:'Grip Gloves',slot:'arms',armor:1},belt:{name:'Utility Belt',slot:'waist',armor:1},
- greaves:{name:'Salt Greaves',slot:'legs',armor:2,speed:.05},boots:{name:'Runner Boots',slot:'feet',armor:1,speed:.1},
- core:{name:'Vital Core',slot:'artifact',hp:25,desc:'A warm, humming relic.'},
- spark:{name:'Spark Drone',slot:'companion',cdmg:1,iv:1.2,range:20,col:0x46e0d0},
- guard:{name:'Guard Drone',slot:'companion',cdmg:2,iv:2.2,range:20,col:0xffd23f},
- spectre:{name:'Spectre',slot:'companion',heal:.05,wait:5,interval:1,range:20,col:0x9d7cff,desc:'Heals you in 5% chunks every second after 5 seconds of no damage.'}};
+ medkit:{name:'Medkit',slot:'item',max:999,scrap:5,desc:'Restores 35 health.',use(){if(P.hp>=maxHp()){toast('Health is full');return false}setHp(P.hp+35);return true}},
+ boost:{name:'Overcharge',slot:'item',max:999,scrap:8,desc:'Doubles fire rate for 8s.',use(){boostT=8;toast('Overcharge active');return true}},
+ blaster:{name:'Pulse Blaster',slot:'weapon',dmg:1,rate:.17,scrap:10,desc:'Reliable sidearm.'},
+ smg:{name:'Rapid SMG',slot:'weapon',dmg:.6,rate:.08,scrap:12,desc:'Fast and light.'},
+ rifle:{name:'Heavy Rifle',slot:'weapon',dmg:2,rate:.38,scrap:16,desc:'One-shot drones.'},
+ helm:{name:'Scout Helm',slot:'head',armor:2,scrap:5},vest:{name:'Dune Vest',slot:'chest',armor:4,scrap:8},
+ gloves:{name:'Grip Gloves',slot:'arms',armor:1,scrap:4},belt:{name:'Utility Belt',slot:'waist',armor:1,scrap:4},
+ greaves:{name:'Salt Greaves',slot:'legs',armor:2,speed:.05,scrap:6},boots:{name:'Runner Boots',slot:'feet',armor:1,speed:.1,scrap:5},
+ core:{name:'Vital Core',slot:'artifact',hp:25,scrap:12,desc:'A warm, humming relic.'},
+ spark:{name:'Spark Drone',slot:'companion',cdmg:1,iv:1.2,range:20,col:0x46e0d0,scrap:10},
+ guard:{name:'Guard Drone',slot:'companion',cdmg:2,iv:2.2,range:20,col:0xffd23f,scrap:14},
+ spectre:{name:'Spectre',slot:'companion',heal:.05,wait:5,interval:1,range:20,col:0x9d7cff,scrap:18,desc:'Heals you in 5% chunks every second after 5 seconds of no damage.'}};
+const DEFAULT_SCRAP_VALUE=5;
+for(const item of Object.values(ITEMS))item.scrap??=DEFAULT_SCRAP_VALUE;
 const GEAR=Object.keys(ITEMS).filter(k=>ITEMS[k].slot&&k!=='blaster');
 const DROP={chance:.45,scrap:.55,medkit:.22,boost:.15}; // gear gets whatever is left
 const PCOL={medkit:0x46e0d0,boost:0xff3d6e,scrap:0xcfcfcf};
@@ -454,7 +456,9 @@ function useItem(id){
 }
 function collect(k,q){
   if(k.id==='scrap'){addScrap(k.n);if(!q)toast('+'+k.n+' scrap');return true}
-  if(addItem(k.id,1)===0){if(!q)toast('+ '+ITEMS[k.id].name);return true}
+  const overflow=addItem(k.id,k.n||1);
+  if(!overflow){if(!q)toast('+ '+ITEMS[k.id].name);return true}
+  if(q){addScrap(overflow*(ITEMS[k.id].scrap??DEFAULT_SCRAP_VALUE));return true}
   return false;
 }
 function dropLoot(pos){
@@ -467,9 +471,13 @@ function dropLoot(pos){
 // End-of-area pickup: collect everything left on the ground; warn before anything would be lost
 const warnEl=$('warn');
 function autoCollect(){
-  let got=0;const left=[];
-  for(const k of pickups.splice(0)){if(collect(k,true)){scene.remove(k.m);got++}else left.push(k)}
-  pickups.push(...left);save();refreshQuick();return{got,left};
+  let got=0,salvaged=0;const left=[];
+  for(const k of pickups.splice(0)){
+    const scrapBefore=WAL.scrap;
+    if(collect(k,true)){scene.remove(k.m);got++;if(k.id!=='scrap')salvaged+=WAL.scrap-scrapBefore}
+    else left.push(k);
+  }
+  pickups.push(...left);save();refreshQuick();return{got,left,salvaged};
 }
 function leavePickups(){
   const r=autoCollect();
@@ -608,9 +616,11 @@ function renderInv(){
       if(it.slot)h+=`<button class="cell" data-a="equip">Equip</button>`;
       if(it.use)h+=`<button class="cell" data-a="use">Use</button>`;
       h+=`<button class="cell" data-a="discard">Discard one</button>`;
+      h+=`<button class="cell" data-a="dismantle">Dismantle one (+${it.scrap??DEFAULT_SCRAP_VALUE} scrap)</button>`;
     }else{
       h+=`<button class="cell" data-a="unequip">Unequip</button>`;
       if(invSel.k[0]==='w')h+=`<button class="cell" data-a="active">Set active</button>`;
+      if(invSel.k[0]!=='i'||count(id)>0)h+=`<button class="cell" data-a="dismantle">Dismantle (+${it.scrap??DEFAULT_SCRAP_VALUE} scrap)</button>`;
     }
     h+=`</div></section>`;
   }
@@ -637,6 +647,13 @@ invEl.onclick=e=>{
     else if(addItem(id,1)>0)toast('Backpack full');else{setRef(r,null);invSel=null}
   }else if(a==='use')useItem(INV.slots[i].id);
   else if(a==='discard'){const s=INV.slots[i];if(--s.n<=0)INV.slots.splice(i,1)}
+  else if(a==='dismantle'){
+    const bagSelection=invSel.a==='bag',r=bagSelection?null:refOf(invSel.k),id=bagSelection?INV.slots[i].id:refSlot(r);
+    if(bagSelection){removeItem(id)}
+    else if(r[0]==='i'){removeItem(id)}
+    else setRef(r,null);
+    const value=ITEMS[id].scrap??DEFAULT_SCRAP_VALUE;addScrap(value);toast('Dismantled '+ITEMS[id].name+' for '+value+' scrap');
+  }
   else if(a==='active')wSel=+invSel.k[1];
   afterInv();
 };
@@ -736,11 +753,11 @@ ${WORLDS.map(w=>`<h3>${w.name}${worldOpen(w)?'':' (locked)'}</h3>${tbl(['Area','
 <h3>Cover</h3><p>Crates and walls block movement and shots, for you and for drones.</p>
 <h3>Score</h3><p>Each drone is worth 10 points times the current wave. Your best score for each area is saved.</p>
 <h3>Defeat</h3><p>At zero health you are overrun. You can retry the area or open the map. You keep your items and scrap.</p>`],
-['loot','Loot and currency',()=>`<h3>Drops</h3><p>${Math.round(DROP.chance*100)}% of downed drones drop something you collect by walking over it. Pickups stay on the ground for the rest of the area. When you clear an area, everything left is collected for you. If your backpack cannot hold it all, a warning appears so you can make room first. Anything still on the ground when you leave is lost.</p>
+['loot','Loot and currency',()=>`<h3>Drops</h3><p>${Math.round(DROP.chance*100)}% of downed drones drop something you collect by walking over it. Pickups stay on the ground for the rest of the area. When you clear an area, everything left is collected for you. Items that do not fit are automatically dismantled for their scrap value.</p>
 ${tbl(['Drop','Chance','Details'],[['Scrap',Math.round(DROP.scrap*100)+'%','2 to 6 scrap times the wave number'],['Medkit',Math.round(DROP.medkit*100)+'%','Goes to your backpack'],['Overcharge',Math.round(DROP.boost*100)+'%','Goes to your backpack'],['Gear',Math.round(gearPct()*100)+'%','One random weapon, armor piece, artifact or companion']])}
 <p>That makes any one specific piece of gear drop about once per ${Math.round(1/(DROP.chance*gearPct()/GEAR.length))} drones. The Upgrade bench at Home does not sell gear yet.</p>
 <h3>Scrap</h3><p>Scrap is a currency, not an item. It never uses a backpack slot and is capped at ${SCRAP_CAP.toLocaleString()}. You have ${WAL.scrap.toLocaleString()}.</p>
-<h3>Items and stacks</h3><p>Your backpack has ${INV.cap} slots. Items stack up to 999 per slot, so a pile of medkits uses one slot. Equipment does not stack.</p>
+<h3>Items and stacks</h3><p>Your backpack has ${INV.cap} slots. Items stack up to 999 per slot, so a pile of medkits uses one slot. Equipment does not stack. Dismantle items from the inventory for their listed scrap value. The two item slots reference a stack in your backpack and consume one item each time you use them.</p>
 ${tbl(['Item','Effect','Owned'],ofKind(t=>!t.slot).map(k=>[ITEMS[k].name,ITEMS[k].desc,count(k)]))}`],
 ['weapons','Weapons',()=>`<h3>Using weapons</h3><p>You have three weapon slots. Switch with ${['w1','w2','w3'].map(k=>keyName(B[k])).join(', ')}. Equip weapons from the inventory. Your weapon is holstered at Home. Overcharge halves the delay between shots. A weapon in an empty slot cannot fire.</p>
 ${tbl(['Weapon','Damage','Shots/s','With Overcharge','Damage/s','Hits to down a drone','Status'],ofKind(t=>t.slot==='weapon').map(k=>{const t=ITEMS[k];return[t.name,t.dmg,r1(1/t.rate),r1(2/t.rate),r1(t.dmg/t.rate),Math.ceil(2/t.dmg),status(k)]}))}
@@ -838,7 +855,10 @@ function complete(){
     if(nw&&first){state='won';release();screen(LV.w.name+' cleared','Score '+score+'. '+nw.name+' is now on the map.');
       btn('Open map',()=>worldMap(nw,null,mainMenu),'main');btn('Keep exploring',resume);return}
     if(state!=='play')resume();
-    toast(r.got?'Area clear. '+r.got+' pickup'+(r.got>1?'s':'')+' collected.':'Area clear. Follow a gate to travel on.');
+    const rewards=[];
+    if(r.got)rewards.push(r.got+' pickup'+(r.got>1?'s':'')+' collected');
+    if(r.salvaged)rewards.push(r.salvaged+' scrap salvaged');
+    toast(rewards.length?'Area clear. '+rewards.join('; ')+'.':'Area clear. Follow a gate to travel on.');
   };
   if(r.left.length)warnFull(finish);else finish();
 }
