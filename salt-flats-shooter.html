@@ -129,7 +129,7 @@ if(isTouch)document.body.classList.add('touch');
 // Persistent storage: one versioned save object behind a swappable adapter
 // (localStorage here; replace `adapter` to target a server, file, or native store)
 const Store=(()=>{
-  const KEY='sfdd.save',VER=5,mem={};
+  const KEY='sfdd.save',VER=6,mem={};
   const adapter={get(k){try{return localStorage.getItem(k)}catch(e){return mem[k]??null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){mem[k]=v}}};
   const defaults=()=>({v:VER,
     options:{sens:1,vol:.7,fov:75,invert:false,dev:false},
@@ -139,7 +139,7 @@ const Store=(()=>{
     abilities:{items:['basicJump','doubleJump','glide']},
     equipment:{weapons:['blaster',null,null],itemSlots:[null,null],jumpType:'basicJump',armor:{head:null,chest:null,arms:null,waist:null,legs:null,feet:null,artifact:null},companion:null},
     wallet:{scrap:0},
-    stats:{kills:0,runs:0},upgrades:{}});
+    stats:{kills:0,runs:0},upgrades:{},weaponLevels:{}});
   const isObj=x=>x&&typeof x==='object'&&!Array.isArray(x);
   function merge(d,src){for(const k in d){if(src&&src[k]!==undefined){if(isObj(d[k])&&Object.keys(d[k]).length)merge(d[k],src[k]);else d[k]=src[k]}}return d}
   function load(){
@@ -398,7 +398,7 @@ function hurt(o,d,impulse){
   }
 }
 function shoot(){
-  const w=ITEMS[EQ.weapons[wSel]];
+  const w=weaponStats(EQ.weapons[wSel]);
   if(!w){fireCd=.5;toast('No weapon in slot '+(wSel+1));return}
   fireCd=w.rate*(boostT>0?.5:1);flashT=.05;flash.intensity=2;gun.position.z=-.48;beep(520,.12,'square',.06);
   const archetype=resolveWeaponArchetype(w.model?.archetype||'sidearm');
@@ -498,20 +498,20 @@ document.addEventListener('touchend',tEnd);document.addEventListener('touchcance
 let boostT=0,wSel=0;const pickups=[];
 const SCRAP_CAP=100000000,ARMOR_SLOTS=['head','chest','arms','waist','legs','feet','artifact'];
 const SLOTLBL={head:'Head',chest:'Chest',arms:'Arms',waist:'Waist',legs:'Legs',feet:'Feet',artifact:'Artifact'};
-// Generic item-slot gear can stack in the backpack, while true equipment (weapons, armor, companions) remains single-instance.
+// Weapons stack as upgrade copies; other equipment remains single-instance.
 const ITEMS={
- medkit:{name:'Medkit',slot:'item',max:999,scrap:5,desc:'Restores 35 health.',use(){if(P.hp>=maxHp()){toast('Health is full');return false}setHp(P.hp+35);return true}},
- boost:{name:'Overcharge',slot:'item',max:999,scrap:8,desc:'Doubles fire rate for 8s.',use(){boostT=8;toast('Overcharge active');return true}},
- blaster:{name:'Pulse Blaster',slot:'weapon',model:{archetype:'sidearm',materials:{accent:0x46e0d0}},dmg:1,rate:.17,scrap:10,desc:'Reliable sidearm.'},
- smg:{name:'Rapid SMG',slot:'weapon',model:{archetype:'compact',materials:{accent:0xff7048}},dmg:.6,rate:.08,scrap:12,desc:'Fast and light.'},
- rifle:{name:'Heavy Rifle',slot:'weapon',model:{archetype:'rifle',materials:{accent:0xd5ae55}},dmg:2,rate:.38,scrap:16,desc:'One-shot drones.'},
- helm:{name:'Scout Helm',slot:'head',armor:2,scrap:5},vest:{name:'Dune Vest',slot:'chest',armor:4,scrap:8},
- gloves:{name:'Grip Gloves',slot:'arms',armor:1,scrap:4},belt:{name:'Utility Belt',slot:'waist',armor:1,scrap:4},
- greaves:{name:'Salt Greaves',slot:'legs',armor:2,speed:.05,scrap:6},boots:{name:'Runner Boots',slot:'feet',armor:1,speed:.1,scrap:5},
- core:{name:'Vital Core',slot:'artifact',hp:25,scrap:12,desc:'A warm, humming relic.'},
- spark:{name:'Spark Drone',slot:'companion',cdmg:1,iv:1.2,range:20,col:0x46e0d0,scrap:10},
- guard:{name:'Guard Drone',slot:'companion',cdmg:2,iv:2.2,range:20,col:0xffd23f,scrap:14},
- spectre:{name:'Spectre',slot:'companion',heal:.05,wait:5,interval:1,range:20,col:0x9d7cff,scrap:18,desc:'Heals you in 5% chunks every second after 5 seconds of no damage.'}};
+ medkit:{name:'Medkit',slot:'item',max:999,drop:{pool:'items',weight:.22},scrap:5,desc:'Restores 35 health.',use(){if(P.hp>=maxHp()){toast('Health is full');return false}setHp(P.hp+35);return true}},
+ boost:{name:'Overcharge',slot:'item',max:999,drop:{pool:'items',weight:.15},scrap:8,desc:'Doubles fire rate for 8s.',use(){boostT=8;toast('Overcharge active');return true}},
+ blaster:{name:'Pulse Blaster',slot:'weapon',model:{archetype:'sidearm',materials:{accent:0x46e0d0}},drop:{pool:'gear',weight:1},scrap:10,desc:'Reliable sidearm.'},
+ smg:{name:'Rapid SMG',slot:'weapon',model:{archetype:'compact',materials:{accent:0xff7048}},drop:{pool:'gear',weight:1},scrap:12,desc:'Fast and light.'},
+ rifle:{name:'Heavy Rifle',slot:'weapon',model:{archetype:'rifle',materials:{accent:0xd5ae55}},drop:{pool:'gear',weight:1},scrap:16,desc:'One-shot drones.'},
+ helm:{name:'Scout Helm',slot:'head',armor:2,drop:{pool:'gear',weight:1},scrap:5},vest:{name:'Dune Vest',slot:'chest',armor:4,drop:{pool:'gear',weight:1},scrap:8},
+ gloves:{name:'Grip Gloves',slot:'arms',armor:1,drop:{pool:'gear',weight:1},scrap:4},belt:{name:'Utility Belt',slot:'waist',armor:1,drop:{pool:'gear',weight:1},scrap:4},
+ greaves:{name:'Salt Greaves',slot:'legs',armor:2,speed:.05,drop:{pool:'gear',weight:1},scrap:6},boots:{name:'Runner Boots',slot:'feet',armor:1,speed:.1,drop:{pool:'gear',weight:1},scrap:5},
+ core:{name:'Vital Core',slot:'artifact',hp:25,drop:{pool:'gear',weight:1},scrap:12,desc:'A warm, humming relic.'},
+ spark:{name:'Spark Drone',slot:'companion',cdmg:1,iv:1.2,range:20,col:0x46e0d0,drop:{pool:'gear',weight:1},scrap:10},
+ guard:{name:'Guard Drone',slot:'companion',cdmg:2,iv:2.2,range:20,col:0xffd23f,drop:{pool:'gear',weight:1},scrap:14},
+ spectre:{name:'Spectre',slot:'companion',heal:.05,wait:5,interval:1,range:20,col:0x9d7cff,drop:{pool:'gear',weight:1},scrap:18,desc:'Heals you in 5% chunks every second after 5 seconds of no damage.'}};
 const DEFAULT_SCRAP_VALUE=5;
 for(const item of Object.values(ITEMS))item.scrap??=DEFAULT_SCRAP_VALUE;
 const ABILITIES={
@@ -521,8 +521,8 @@ const ABILITIES={
 };
 let gunModelId;
 const WEAPON_ARCHETYPES={
-  base:{materials:{frame:0x303447,edge:0x171b28,accent:0x46e0d0,barrel:0x727c87},projectile:{speed:48,mass:.1,radius:.07,color:0x46e0d0},muzzleZ:-.4,parts:[]},
-  sidearm:{extends:'base',projectile:{speed:48,mass:.09,radius:.075,color:0x46e0d0},muzzleZ:-.44,parts:[
+  base:{materials:{frame:0x303447,edge:0x171b28,accent:0x46e0d0,barrel:0x727c87},projectile:{speed:48,mass:.1,radius:.07,color:0x46e0d0},stats:{dmg:1,rate:.2,upgrade:{copies:10,scrap:25,maxLevel:5,damagePerLevel:.25}},muzzleZ:-.4,parts:[]},
+  sidearm:{extends:'base',projectile:{speed:48,mass:.09,radius:.075,color:0x46e0d0},stats:{dmg:1,rate:.17},muzzleZ:-.44,parts:[
     {shape:'box',size:[.16,.16,.34],material:'frame',at:[0,0,.015]},
     {shape:'box',size:[.12,.1,.2],material:'edge',at:[0,.09,-.045]},
     {shape:'box',size:[.11,.23,.13],material:'edge',at:[0,-.15,.11],rotation:[-.18,0,0]},
@@ -531,7 +531,7 @@ const WEAPON_ARCHETYPES={
     {shape:'box',size:[.19,.035,.13],material:'edge',at:[0,.105,.105]},
     {shape:'box',size:[.17,.045,.08],material:'accent',at:[0,-.015,-.24]}
   ]},
-  compact:{extends:'base',projectile:{speed:48,mass:.045,radius:.055,color:0xff7048},muzzleZ:-.64,parts:[
+  compact:{extends:'base',projectile:{speed:48,mass:.045,radius:.055,color:0xff7048},stats:{dmg:.6,rate:.08,upgrade:{damagePerLevel:.2}},muzzleZ:-.64,parts:[
     {shape:'box',size:[.17,.18,.48],material:'frame',at:[0,0,0]},
     {shape:'box',size:[.13,.07,.23],material:'edge',at:[0,.12,-.03]},
     {shape:'box',size:[.12,.22,.14],material:'edge',at:[0,-.16,.08],rotation:[-.12,0,0]},
@@ -541,7 +541,7 @@ const WEAPON_ARCHETYPES={
     {shape:'box',size:[.19,.035,.31],material:'edge',at:[0,.145,-.03]},
     {shape:'box',size:[.12,.035,.055],material:'accent',at:[0,-.085,.01]}
   ]},
-  rifle:{extends:'base',materials:{frame:0x59614a,edge:0x252c26,barrel:0x798078},projectile:{speed:72,mass:.32,radius:.11,color:0xd5ae55},muzzleZ:-.84,parts:[
+  rifle:{extends:'base',materials:{frame:0x59614a,edge:0x252c26,barrel:0x798078},projectile:{speed:72,mass:.32,radius:.11,color:0xd5ae55},stats:{dmg:2,rate:.38,upgrade:{damagePerLevel:.35}},muzzleZ:-.84,parts:[
     {shape:'box',size:[.18,.2,.54],material:'frame',at:[0,0,.02]},
     {shape:'box',size:[.15,.12,.26],material:'edge',at:[0,-.025,.37]},
     {shape:'box',size:[.13,.24,.15],material:'edge',at:[0,-.19,.04],rotation:[-.08,0,0]},
@@ -555,10 +555,10 @@ const WEAPON_ARCHETYPES={
 };
 function resolveWeaponArchetype(name,seen=new Set()){
   const definition=WEAPON_ARCHETYPES[name]||WEAPON_ARCHETYPES.sidearm;
-  if(seen.has(name))return{materials:{},parts:[],projectile:{},muzzleZ:-.4,scale:1};
+  if(seen.has(name))return{materials:{},parts:[],projectile:{},stats:{},muzzleZ:-.4,scale:1};
   const chain=new Set(seen);chain.add(name);
-  const parent=definition.extends?resolveWeaponArchetype(definition.extends,chain):{materials:{},parts:[],projectile:{},muzzleZ:-.4,scale:1};
-  return{materials:{...parent.materials,...definition.materials},parts:[...parent.parts,...(definition.parts||[])],projectile:{...parent.projectile,...definition.projectile},muzzleZ:definition.muzzleZ??parent.muzzleZ,scale:parent.scale*(definition.scale||1)};
+  const parent=definition.extends?resolveWeaponArchetype(definition.extends,chain):{materials:{},parts:[],projectile:{},stats:{},muzzleZ:-.4,scale:1};
+  return{materials:{...parent.materials,...definition.materials},parts:[...parent.parts,...(definition.parts||[])],projectile:{...parent.projectile,...definition.projectile},stats:{...parent.stats,...definition.stats,upgrade:{...parent.stats.upgrade,...definition.stats?.upgrade}},muzzleZ:definition.muzzleZ??parent.muzzleZ,scale:parent.scale*(definition.scale||1)};
 }
 function makeGunModel(id){
   const variant=ITEMS[id].model||{},base=resolveWeaponArchetype(variant.archetype||'sidearm');
@@ -579,10 +579,10 @@ function syncGunModel(){
   while(gun.children.length)gun.remove(gun.children[0]);
   if(id)gun.add(makeGunModel(id));
 }
-const GEAR=Object.keys(ITEMS).filter(k=>ITEMS[k].slot&&ITEMS[k].slot!=='item'&&k!=='blaster');
-const DROP={chance:.45,scrap:.55,medkit:.22,boost:.15}; // gear gets whatever is left
+const GEAR=Object.keys(ITEMS).filter(k=>ITEMS[k].drop?.pool==='gear'&&ITEMS[k].drop.weight>0);
+const DROP={chance:.45,weights:{scrap:.55,items:.37,gear:.08}};
 const PCOL={medkit:0x46e0d0,boost:0xff3d6e,scrap:0xcfcfcf};
-const maxOf=id=>(ITEMS[id].max ?? ((ITEMS[id].slot && ITEMS[id].slot!=='item')?1:999));
+const maxOf=id=>(ITEMS[id].max ?? (ITEMS[id].slot&&ITEMS[id].slot!=='item'&&ITEMS[id].slot!=='weapon'?1:999));
 // Repair saves that reference items or abilities that no longer exist, or hold impossible values
 (function sanitizeSave(){
   INV.slots=INV.slots.filter(x=>ITEMS[x.id]&&x.n>0).map(x=>({id:x.id,n:Math.min(Math.floor(x.n),maxOf(x.id))})).slice(0,INV.cap);
@@ -592,8 +592,20 @@ const maxOf=id=>(ITEMS[id].max ?? ((ITEMS[id].slot && ITEMS[id].slot!=='item')?1
   if(ITEMS[EQ.companion]?.slot!=='companion')EQ.companion=null;
   ABIL.items=ABIL.items.filter(id=>ABILITIES[id]);
   if(!ABIL.items.includes(EQ.jumpType))EQ.jumpType=ABIL.items.includes('basicJump')?'basicJump':null;
+  Store.data.weaponLevels=Store.data.weaponLevels||{};
+  Object.keys(Store.data.weaponLevels).forEach(id=>{
+    if(ITEMS[id]?.slot!=='weapon')delete Store.data.weaponLevels[id];
+    else Store.data.weaponLevels[id]=Math.max(0,Math.min(weaponStats(id).upgrade.maxLevel??5,Math.floor(+Store.data.weaponLevels[id]||0)));
+  });
   WAL.scrap=Math.max(0,Math.min(SCRAP_CAP,Math.floor(+WAL.scrap||0)));
 })();
+function weaponStats(id){
+  const item=ITEMS[id];if(item?.slot!=='weapon')return null;
+  const defaults=resolveWeaponArchetype(item.model?.archetype||'sidearm').stats;
+  const upgrade={...defaults.upgrade,...item.upgrade};
+  const level=Store.data.weaponLevels[id]||0;
+  return{dmg:(item.dmg??defaults.dmg??1)+level*(upgrade.damagePerLevel||0),rate:item.rate??defaults.rate??.2,level,upgrade};
+}
 const bonus=k=>ARMOR_SLOTS.reduce((t,s)=>t+((ITEMS[EQ.armor[s]]||{})[k]||0),0);
 const maxHp=()=>100+bonus('hp'),armorRed=()=>{const a=bonus('armor');return a/(a+40)};
 const wk=c=>Object.keys(B).find(k=>B[k]===c)||'';
@@ -608,6 +620,19 @@ function addItem(id,n){
   return n;
 }
 function removeItem(id){const i=INV.slots.findIndex(s=>s.id===id);if(i<0)return;if(--INV.slots[i].n<=0)INV.slots.splice(i,1)}
+function removeItems(id,n){
+  for(let i=INV.slots.length-1;i>=0&&n>0;i--)if(INV.slots[i].id===id){
+    const take=Math.min(n,INV.slots[i].n);INV.slots[i].n-=take;n-=take;
+    if(INV.slots[i].n<=0)INV.slots.splice(i,1);
+  }
+  return n===0;
+}
+function upgradeWeapon(id){
+  const stats=weaponStats(id);if(!stats)return false;
+  const {copies=10,scrap=25,maxLevel=5}=stats.upgrade,level=stats.level,cost=scrap*(level+1);
+  if(level>=maxLevel||count(id)<copies||WAL.scrap<cost)return false;
+  removeItems(id,copies);WAL.scrap-=cost;Store.data.weaponLevels[id]=level+1;save();syncHud();return true;
+}
 function useItem(id){
   const it=ITEMS[id];if(!it.use||!count(id)||!it.use())return false;
   removeItem(id);beep(660,.2,'sine',.08);save();refreshQuick();return true;
@@ -615,7 +640,7 @@ function useItem(id){
 // New gear goes straight into a matching empty slot (never when returning items from the inventory screen)
 function autoEquip(id){
   const it=ITEMS[id];
-  if(it.slot==='weapon'){const i=EQ.weapons.indexOf(null);if(i<0)return false;EQ.weapons[i]=id;return true}
+  if(it.slot==='weapon'){if(EQ.weapons.includes(id))return false;const i=EQ.weapons.indexOf(null);if(i<0)return false;EQ.weapons[i]=id;return true}
   if(it.slot==='companion'){if(EQ.companion)return false;EQ.companion=id;refreshCompanion();return true}
   if(ARMOR_SLOTS.includes(it.slot)){if(EQ.armor[it.slot])return false;EQ.armor[it.slot]=id;return true}
   return false;
@@ -636,12 +661,24 @@ function collect(k,q){
   return false;
 }
 function dropLoot(pos){
-  if(Math.random()>DROP.chance)return;const r=Math.random();let id,n=1;
-  if(r<DROP.scrap){id='scrap';n=Math.ceil((2+Math.random()*4)*wave)}else if(r<DROP.scrap+DROP.medkit)id='medkit';else if(r<DROP.scrap+DROP.medkit+DROP.boost)id='boost';else id=GEAR[Math.floor(Math.random()*GEAR.length)];
+  if(Math.random()>DROP.chance)return;const r=Math.random(),{scrap,items}=DROP.weights;let id,n=1;
+  if(r<scrap){id='scrap';n=Math.ceil((2+Math.random()*4)*wave)}
+  else if(r<scrap+items)id=pickFromPool('items');
+  else id=pickFromPool('gear');
+  if(!id)return;
   const c=PCOL[id]||0xb58cff;
   const m=new THREE.Mesh(new THREE.BoxGeometry(.35,.35,.35),new THREE.MeshLambertMaterial({color:c,emissive:c,emissiveIntensity:.4}));
   m.position.set(pos.x,.6,pos.z);scene.add(m);pickups.push({m,id,n,t:30});
 }
+function pickFromPool(pool){
+  const entries=Object.keys(ITEMS).filter(id=>ITEMS[id].drop?.pool===pool&&ITEMS[id].drop.weight>0);
+  const total=entries.reduce((sum,id)=>sum+ITEMS[id].drop.weight,0);
+  if(!total)return null;
+  let roll=Math.random()*total;
+  for(const id of entries){roll-=ITEMS[id].drop.weight;if(roll<0)return id}
+  return entries[entries.length-1]||null;
+}
+const pickGear=()=>pickFromPool('gear');
 // End-of-area pickup: collect everything left on the ground; anything that does not fit is salvaged for scrap
 const warnEl=$('warn');
 function autoCollect(){
@@ -751,7 +788,10 @@ const refSlot=r=>r[0]==='w'?EQ.weapons[r[1]]:r[0]==='a'?EQ.armor[r[1]]:r[0]==='i
 const setRef=(r,id)=>{if(r[0]==='w')EQ.weapons[r[1]]=id;else if(r[0]==='a')EQ.armor[r[1]]=id;else if(r[0]==='i')EQ.itemSlots[r[1]]=id;else if(r[0]==='j')EQ.jumpType=id;else EQ.companion=id};
 function info(id){
   const t=ITEMS[id]||ABILITIES[id],p=[];
-  if(t.dmg)p.push('Damage '+t.dmg);if(t.rate)p.push((1/t.rate).toFixed(1)+' shots/s');if(t.armor)p.push('Armor +'+t.armor);
+  if(t.slot==='weapon'){
+    const w=weaponStats(id);p.push('Level '+w.level+' / '+w.upgrade.maxLevel,`Damage ${w.dmg}`,`${(1/w.rate).toFixed(1)} shots/s`);
+  }else{if(t.dmg)p.push('Damage '+t.dmg);if(t.rate)p.push((1/t.rate).toFixed(1)+' shots/s')}
+  if(t.armor)p.push('Armor +'+t.armor);
   if(t.hp)p.push('Max health +'+t.hp);if(t.speed)p.push('Speed +'+Math.round(t.speed*100)+'%');if(t.cdmg)p.push('Assist '+t.cdmg+' dmg every '+t.iv+'s');
   if(t.heal)p.push('Heals '+Math.round(t.heal*100)+'% max HP every '+t.interval+'s after '+t.wait+'s of no damage');
   if(t.jumpVelocity)p.push('Jump velocity '+t.jumpVelocity);
@@ -759,9 +799,9 @@ function info(id){
   if(t.glideDecay)p.push('Press Jump in midair to activate logarithmic glide');
   return (t.desc?t.desc+' ':'')+p.join(', ');
 }
-function cell(a,k,label,id,extra,sel){const item=ITEMS[id]||ABILITIES[id];return `<button class="cell ${id?'':'empty'} ${sel?'sel':''}" data-a="${a}" data-k="${k}"><small>${label}</small>${item?item.name:'Empty'}${extra||''}</button>`}
+function cell(a,k,label,id,extra,sel){const item=ITEMS[id]||ABILITIES[id],level=item?.slot==='weapon'?`<small>Level ${weaponStats(id).level}</small>`:'';return `<button class="cell ${id?'':'empty'} ${sel?'sel':''}" data-a="${a}" data-k="${k}"><small>${label}</small>${item?item.name:'Empty'}${level}${extra||''}</button>`}
 function renderInv(){
-  const mh=maxHp(),w=ITEMS[EQ.weapons[wSel]],c=ITEMS[EQ.companion],S=Store.data.stats;
+  const mh=maxHp(),w=weaponStats(EQ.weapons[wSel]),c=ITEMS[EQ.companion],S=Store.data.stats;
   let id=null;if(invSel)id=invSel.a==='bag'?(INV.slots[+invSel.k]||{}).id:invSel.a==='ability'?invSel.k:refSlot(refOf(invSel.k));
   if(!id)invSel=null;
   const sel=(a,k)=>invSel&&invSel.a===a&&invSel.k==k;
@@ -801,6 +841,13 @@ function renderInv(){
       if(invSel.k[0]==='j')h+=`<span>Abilities cannot be discarded or dismantled.</span>`;
       else if(invSel.k[0]!=='i'||count(id)>0)h+=`<button class="cell" data-a="dismantle">Dismantle (+${it.scrap??DEFAULT_SCRAP_VALUE} scrap)</button>`;
     }
+    if(it.slot==='weapon'){
+      const stats=weaponStats(id),copies=stats.upgrade.copies??10,cost=(stats.upgrade.scrap??25)*(stats.level+1);
+      if(stats.level<(stats.upgrade.maxLevel??5)){
+        const ready=count(id)>=copies&&WAL.scrap>=cost;
+        h+=`<button class="cell" data-a="upgrade" ${ready?'':'disabled'}>Upgrade to level ${stats.level+1} (${count(id)}/${copies} copies, ${cost} scrap)</button>`;
+      }else h+=`<span>Maximum level reached.</span>`;
+    }
     h+=`</div></section>`;
   }
   invEl.innerHTML=h+'</div>';
@@ -811,7 +858,10 @@ invEl.onclick=e=>{
   if(a==='close')return closeInv();
   if(a==='bag'||a==='eq'||a==='ability'){invSel={a,k};return renderInv()}
   const i=invSel&&+invSel.k;
-  if(a==='equip'){
+  const selectedId=invSel&&(invSel.a==='bag'?(INV.slots[i]||{}).id:invSel.a==='ability'?invSel.k:refSlot(refOf(invSel.k)));
+  if(a==='upgrade'){
+    if(upgradeWeapon(selectedId))toast(ITEMS[selectedId].name+' upgraded to level '+weaponStats(selectedId).level);
+  }else if(a==='equip'){
     if(invSel.a==='ability'){EQ.jumpType=invSel.k;invSel=null;afterInv();return}
     const s=INV.slots[i],it=ITEMS[s.id],id=s.id;
     let r;
@@ -952,7 +1002,7 @@ const tbl=(h,r)=>`<table><tr>${h.map(x=>`<th>${x}</th>`).join('')}</tr>${r.map(w
 const status=id=>EQ.weapons.includes(id)||Object.values(EQ.armor).includes(id)||EQ.companion===id?'Equipped':count(id)?'In backpack':'Not found yet';
 const ofKind=f=>Object.keys(ITEMS).filter(k=>f(ITEMS[k]));
 const r1=x=>Math.round(x*10)/10;
-const gearPct=()=>1-DROP.scrap-DROP.medkit-DROP.boost;
+const gearPct=()=>DROP.weights.gear;
 const COMP=[
 ['basics','Basics',()=>`<h3>Goal</h3><p>Drones have overrun the flats. Home is your safe base. Travel out on the map, clear each area of its drone waves, and push on to a world's final area (marked with a star) to open the next world.</p>
 <h3>Controls</h3>${tbl(['Action','Key'],[['Move',[B.forward,B.left,B.back,B.right].map(keyName).join(' ')+' or arrow keys'],['Look','Mouse (click the game to capture it)'],['Fire','Mouse click'],['Aim down sights','Hold right mouse button'],...ACTIONS.filter(a=>!['forward','back','left','right'].includes(a[0])).map(([a,l])=>[l,keyName(B[a])]),['Pause, or close a menu','Esc']])}
@@ -967,15 +1017,15 @@ ${WORLDS.map(w=>`<h3>${w.name}${worldOpen(w)?'':' (locked)'}</h3>${tbl(['Area','
 <h3>Score</h3><p>Each drone is worth 10 points times the current wave. Your best score for each area is saved.</p>
 <h3>Defeat</h3><p>At zero health you are overrun. You can retry the area or open the map. You keep your items and scrap.</p>`],
 ['loot','Loot and currency',()=>`<h3>Drops</h3><p>${Math.round(DROP.chance*100)}% of downed drones drop something you collect by walking over it. Pickups stay on the ground for the rest of the area. When you clear an area, or are overrun, everything left on the ground is collected for you. Items that do not fit are automatically dismantled for their scrap value.</p>
-${tbl(['Drop','Chance','Details'],[['Scrap',Math.round(DROP.scrap*100)+'%','2 to 6 scrap times the wave number'],['Medkit',Math.round(DROP.medkit*100)+'%','Goes to your backpack'],['Overcharge',Math.round(DROP.boost*100)+'%','Goes to your backpack'],['Gear',Math.round(gearPct()*100)+'%','One random weapon, armor piece, artifact or companion']])}
-<p>That makes any one specific piece of gear drop about once per ${Math.round(1/(DROP.chance*gearPct()/GEAR.length))} drones. The Upgrade bench at Home does not sell gear yet.</p>
+${tbl(['Drop','Chance','Details'],[['Scrap',Math.round(DROP.weights.scrap*100)+'%','2 to 6 scrap times the wave number'],['Consumable',Math.round(DROP.weights.items*100)+'%','Selected from item drop data'],['Gear',Math.round(gearPct()*100)+'%','Weighted by each gear item’s drop data']])}
+<p>Drop eligibility and weights are configured on each item. Weapon duplicates stack in your backpack. Select a weapon in the inventory to spend 10 copies and scrap to raise its level; upgrades increase damage, and the requirements and scaling are configurable per weapon.</p>
 <h3>Scrap</h3><p>Scrap is a currency, not an item. It never uses a backpack slot and is capped at ${SCRAP_CAP.toLocaleString()}. You have ${WAL.scrap.toLocaleString()}.</p>
-<h3>Supply caches</h3><p>The first time you clear an area, a supply cache appears in it. Stand next to it and press ${keyName(B.use)} (or tap the prompt) to open it for scrap and either two medkits or a piece of gear. Each area has one cache, and it can only be opened once.</p><h3>Items and stacks</h3><p>Your backpack has ${INV.cap} slots. Items stack up to 999 per slot, so a pile of medkits uses one slot. Equipment does not stack. New gear goes straight into a matching empty slot, and new consumables fill an empty item slot. Dismantle items from the inventory for their listed scrap value. The two item slots reference a stack in your backpack and consume one item each time you use them.</p>
+<h3>Supply caches</h3><p>The first time you clear an area, a supply cache appears in it. Stand next to it and press ${keyName(B.use)} (or tap the prompt) to open it for scrap and either two medkits or a piece of gear. Each area has one cache, and it can only be opened once.</p><h3>Items and stacks</h3><p>Your backpack has ${INV.cap} slots. Consumables and weapon duplicates stack up to 999 per slot. Armor, artifacts, and companions do not stack. New gear goes straight into a matching empty slot, and new consumables fill an empty item slot. Dismantle items from the inventory for their listed scrap value. The two item slots reference a stack in your backpack and consume one item each time you use them.</p>
 <h3>Abilities</h3><p>Abilities are stored separately from items and cannot be discarded or dismantled. Select an ability to equip it in its matching ability slot.</p>
 ${tbl(['Item','Effect','Owned'],ofKind(t=>!t.slot).map(k=>[ITEMS[k].name,ITEMS[k].desc,count(k)]))}`],
-['weapons','Weapons',()=>`<h3>Using weapons</h3><p>You have three weapon slots. Switch with ${['w1','w2','w3'].map(k=>keyName(B[k])).join(', ')}. Equip weapons from the inventory. Your weapon is holstered at Home. Overcharge halves the delay between shots. A weapon in an empty slot cannot fire.</p>
-${tbl(['Weapon','Damage','Shots/s','With Overcharge','Damage/s','Hits to down a drone','Status'],ofKind(t=>t.slot==='weapon').map(k=>{const t=ITEMS[k];return[t.name,t.dmg,r1(1/t.rate),r1(2/t.rate),r1(t.dmg/t.rate),Math.ceil(2/t.dmg),status(k)]}))}
-<p>The Pulse Blaster is your starting weapon. Other weapons come from drone drops.</p>`],
+['weapons','Weapons',()=>`<h3>Using weapons</h3><p>You have three weapon slots. Switch with ${['w1','w2','w3'].map(k=>keyName(B[k])).join(', ')}. Equip weapons from the inventory. Your weapon is holstered at Home. Overcharge halves the delay between shots. A weapon in an empty slot cannot fire. Each level is shared by every copy of the same weapon.</p>
+${tbl(['Weapon','Level','Damage','Shots/s','With Overcharge','Damage/s','Hits to down a drone','Status'],ofKind(t=>t.slot==='weapon').map(k=>{const t=ITEMS[k],s=weaponStats(k);return[t.name,s.level+'/'+s.upgrade.maxLevel,s.dmg,r1(1/s.rate),r1(2/s.rate),r1(s.dmg/s.rate),Math.ceil(2/s.dmg),status(k)]}))}
+<p>The Pulse Blaster is your starting weapon. Other weapons come from drone drops. Upgrade any owned weapon in the inventory using 10 duplicate copies and scrap.</p>`],
 ['armor','Armor and artifacts',()=>`<h3>Slots</h3><p>Armor goes in head, chest, arms, waist, legs and feet slots. The artifact slot holds one relic. Armor and artifacts only count while equipped.</p>
 ${tbl(['Slot','Item','Armor','Other bonus','Status'],ofKind(t=>ARMOR_SLOTS.includes(t.slot)).map(k=>{const t=ITEMS[k];return[SLOTLBL[t.slot],t.name,t.armor||0,[t.hp&&'+'+t.hp+' max health',t.speed&&'+'+Math.round(t.speed*100)+'% speed'].filter(Boolean).join(', ')||'-',status(k)]}))}
 <h3>How armor works</h3><p>Damage reduction = armor / (armor + 40). 10 armor cuts damage by 20%, 20 by 33%, and 40 by 50%. Each point is worth a little less than the last, so you can never become immune. The best armor currently available totals ${ARMOR_SLOTS.reduce((t,sl)=>t+Math.max(0,...ofKind(i=>i.slot===sl).map(k=>ITEMS[k].armor||0)),0)}.</p>
@@ -1044,7 +1094,7 @@ function spawnCache(){
   cache={m,x,z,label:'Open supply cache',act:openCache};
 }
 function openCache(){
-  const rolls=[{id:'scrap',n:Math.ceil((15+Math.random()*25)*LV.waves)},Math.random()<.35?{id:GEAR[Math.floor(Math.random()*GEAR.length)],n:1}:{id:'medkit',n:2}];
+  const rolls=[{id:'scrap',n:Math.ceil((15+Math.random()*25)*LV.waves)},Math.random()<.35&&GEAR.length?{id:pickGear(),n:1}:{id:'medkit',n:2}];
   rolls.forEach(k=>collect(k,true));
   PROG.looted[LV.id]=true;removeCache();save();syncHud();beep(880,.3,'sine',.1);
   const extra=rolls.reduce((t,k)=>t+(k.salvaged||0),0);
