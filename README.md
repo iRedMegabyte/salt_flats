@@ -1,8 +1,12 @@
-# Salt Flats Drone Defense
+# salt_flats
 
 A browser-based first-person shooter built with Three.js. Travel between destinations, fight waves of drones, collect equipment and scrap, and improve your weapons. The game and its content are currently implemented in a single HTML file: [`salt-flats-shooter.html`](./salt-flats-shooter.html).
 
 ## Run the game
+
+Visit <https://iredmegabyte.github.io/salt_flats/>
+
+## Build 
 
 There is no build step or package installation. Open `salt-flats-shooter.html` in a modern browser. The page loads Three.js r128 from a CDN, so an internet connection is needed unless that script is made available locally.
 

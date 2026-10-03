@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Salt Flats Drone Defense</title>
+<title>salt_flats</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Cpath%20fill%3D%22%2346e0d0%22%20d%3D%22M32%204%2056%2018v28L32%2060%208%2046V18z%22%2F%3E%3C%2Fsvg%3E">
 <style>
 :root{--bg:#1b1d3d;--ink:#fff4dc;--hot:#ffd23f;--cool:#46e0d0;--bad:#ff3d6e;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
@@ -106,6 +106,9 @@ canvas{display:block;position:fixed;inset:0;width:100%;height:100%}
 #usePrompt{display:none;position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 30%);transform:translateX(-50%);pointer-events:auto;font:inherit;font-weight:700;font-size:16px;padding:10px 18px;border-radius:10px;border:2px solid var(--hot);background:#1b1d3dee;color:var(--ink);cursor:pointer}
 #usePrompt.on{display:block}
 #usePrompt:focus-visible{outline:3px solid var(--cool);outline-offset:3px}
+#menu.wide{width:min(560px,100%)}
+#menu textarea{font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;width:100%;box-sizing:border-box;min-height:150px;background:#0006;color:var(--ink);border:1px solid #fff5;border-radius:8px;padding:8px;resize:vertical}
+#menu textarea:focus-visible{outline:3px solid var(--cool);outline-offset:2px}
 </style>
 </head>
 <body>
@@ -129,7 +132,7 @@ if(isTouch)document.body.classList.add('touch');
 // Persistent storage: one versioned save object behind a swappable adapter
 // (localStorage here; replace `adapter` to target a server, file, or native store)
 const Store=(()=>{
-  const KEY='sfdd.save',VER=6,mem={};
+  const KEY='sfdd.save',VER=5,mem={};
   const adapter={get(k){try{return localStorage.getItem(k)}catch(e){return mem[k]??null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){mem[k]=v}}};
   const defaults=()=>({v:VER,
     options:{sens:1,vol:.7,fov:75,invert:false,dev:false},
@@ -139,56 +142,33 @@ const Store=(()=>{
     abilities:{items:['basicJump','doubleJump','glide']},
     equipment:{weapons:['blaster',null,null],itemSlots:[null,null],jumpType:'basicJump',armor:{head:null,chest:null,arms:null,waist:null,legs:null,feet:null,artifact:null},companion:null},
     wallet:{scrap:0},
-    stats:{kills:0,runs:0},upgrades:{},weaponLevels:{}});
+    stats:{kills:0,runs:0},upgrades:{}});
   const isObj=x=>x&&typeof x==='object'&&!Array.isArray(x);
   function merge(d,src){for(const k in d){if(src&&src[k]!==undefined){if(isObj(d[k])&&Object.keys(d[k]).length)merge(d[k],src[k]);else d[k]=src[k]}}return d}
-  function validateImport(saved){
-    const obj=(v,name)=>{if(!isObj(v))throw new Error(name+' must be an object')};
-    const arr=(v,name)=>{if(!Array.isArray(v))throw new Error(name+' must be an array')};
-    obj(saved,'Save');
-    if(saved.v!==undefined&&(!Number.isInteger(saved.v)||saved.v<1||saved.v>VER))throw new Error('Unsupported save version');
-    for(const key of ['options','keys','progress','inventory','abilities','equipment','wallet','stats','upgrades','weaponLevels'])obj(saved[key],'Save '+key);
-    obj(saved.progress.done,'Save progress.done');obj(saved.progress.looted,'Save progress.looted');
-    obj(saved.inventory,'Save inventory');arr(saved.inventory.slots,'Save inventory.slots');
-    saved.inventory.slots.forEach((slot,i)=>{
-      obj(slot,'Inventory slot '+(i+1));
-      if(typeof slot.id!=='string'||!Number.isFinite(slot.n)||slot.n<1)throw new Error('Invalid inventory slot '+(i+1));
-    });
-    arr(saved.abilities.items,'Save abilities.items');
-    obj(saved.equipment,'Save equipment');arr(saved.equipment.weapons,'Save equipment.weapons');
-    arr(saved.equipment.itemSlots,'Save equipment.itemSlots');obj(saved.equipment.armor,'Save equipment.armor');
-    if(!Number.isFinite(saved.wallet.scrap)||saved.wallet.scrap<0)throw new Error('Invalid scrap amount');
-    if(!Number.isFinite(saved.stats.kills)||!Number.isFinite(saved.stats.runs))throw new Error('Invalid player stats');
-    for(const [key,value] of Object.entries(saved.weaponLevels))if(!Number.isFinite(value)||value<0)throw new Error('Invalid weapon level for '+key);
-    return saved;
+  function normalize(saved){
+    const from=saved.v||1;let d=merge(defaults(),saved);
+    // v3: equipped item slots now reference backpack stacks, so return the equipped item to the backpack
+    if(from<3)for(const id of d.equipment.itemSlots){if(!id)continue;const st=d.inventory.slots.find(x=>x.id===id);if(st)st.n=Math.min(999,st.n+1);else d.inventory.slots.push({id,n:1})}
+    // v4/v5: movement abilities are a permanent unlock list, not backpack items
+    if(from<5)d.abilities.items=[...new Set([...(d.abilities.items||[]),'basicJump','doubleJump','glide'])];
+    d.inventory.slots=d.inventory.slots.filter(x=>{if(x.id==='scrap'){d.wallet.scrap=Math.min(100000000,(+d.wallet.scrap||0)+(+x.n||0));return false}return true});
+    d.inventory.cap=Math.max(d.inventory.cap,24);d.v=VER;
+    return{d,migrated:from<VER};
   }
   function load(){
     let d=defaults(),dirty=false;
     try{
       const raw=adapter.get(KEY);
-      if(raw){
-        const saved=JSON.parse(raw),from=saved.v||1;
-        d=merge(d,saved);
-        // v3: equipped item slots now reference backpack stacks, so return the equipped item to the backpack
-        if(from<3)for(const id of d.equipment.itemSlots){if(!id)continue;const st=d.inventory.slots.find(x=>x.id===id);if(st)st.n=Math.min(999,st.n+1);else d.inventory.slots.push({id,n:1})}
-        // v4/v5: movement abilities are a permanent unlock list, not backpack items
-        if(from<5)d.abilities.items=[...new Set([...(d.abilities.items||[]),'basicJump','doubleJump','glide'])];
-        dirty=from<VER;
-      }
-      else{const old=JSON.parse(adapter.get('sfdd')||'null');if(old){merge(d.options,old.OPT)}}
+      if(raw){const r=normalize(JSON.parse(raw));d=r.d;dirty=r.migrated}
+      else{const old=JSON.parse(adapter.get('sfdd')||'null');if(old)merge(d.options,old.OPT)}
     }catch(e){}
-    d.inventory.slots=d.inventory.slots.filter(s=>{if(s.id==='scrap'){d.wallet.scrap=Math.min(100000000,d.wallet.scrap+s.n);return false}return true});
-    d.inventory.cap=Math.max(d.inventory.cap,24);d.v=VER;
     if(dirty)adapter.set(KEY,JSON.stringify(d));
     return d;
   }
   const data=load();
-  return{data,defaults,save(){adapter.set(KEY,JSON.stringify(data))},
-    import(raw){
-      let saved;
-      try{saved=validateImport(JSON.parse(raw))}catch(e){throw new Error('Could not read save: '+e.message)}
-      try{localStorage.setItem(KEY,JSON.stringify(saved))}catch(e){throw new Error('Could not store save in this browser: '+e.message)}
-    },
+  return{data,defaults,VER,normalize:saved=>normalize(saved).d,
+    replace(n){for(const k in n)if(isObj(n[k])){Object.keys(data[k]).forEach(x=>delete data[k][x]);Object.assign(data[k],n[k])}this.save()},
+    save(){adapter.set(KEY,JSON.stringify(data))},
     reset(){const f=defaults();for(const k in f)if(isObj(f[k])){Object.keys(data[k]).forEach(x=>delete data[k][x]);Object.assign(data[k],f[k])}this.save()}};
 })();
 const OPT=Store.data.options,B=Store.data.keys,INV=Store.data.inventory,ABIL=Store.data.abilities,PROG=Store.data.progress,EQ=Store.data.equipment,WAL=Store.data.wallet;
@@ -423,7 +403,7 @@ function hurt(o,d,impulse){
   }
 }
 function shoot(){
-  const w=weaponStats(EQ.weapons[wSel]);
+  const w=ITEMS[EQ.weapons[wSel]];
   if(!w){fireCd=.5;toast('No weapon in slot '+(wSel+1));return}
   fireCd=w.rate*(boostT>0?.5:1);flashT=.05;flash.intensity=2;gun.position.z=-.48;beep(520,.12,'square',.06);
   const archetype=resolveWeaponArchetype(w.model?.archetype||'sidearm');
@@ -523,20 +503,20 @@ document.addEventListener('touchend',tEnd);document.addEventListener('touchcance
 let boostT=0,wSel=0;const pickups=[];
 const SCRAP_CAP=100000000,ARMOR_SLOTS=['head','chest','arms','waist','legs','feet','artifact'];
 const SLOTLBL={head:'Head',chest:'Chest',arms:'Arms',waist:'Waist',legs:'Legs',feet:'Feet',artifact:'Artifact'};
-// Weapons stack as upgrade copies; other equipment remains single-instance.
+// Generic item-slot gear can stack in the backpack, while true equipment (weapons, armor, companions) remains single-instance.
 const ITEMS={
- medkit:{name:'Medkit',slot:'item',max:999,drop:{pool:'items',weight:.22},scrap:5,desc:'Restores 35 health.',use(){if(P.hp>=maxHp()){toast('Health is full');return false}setHp(P.hp+35);return true}},
- boost:{name:'Overcharge',slot:'item',max:999,drop:{pool:'items',weight:.15},scrap:8,desc:'Doubles fire rate for 8s.',use(){boostT=8;toast('Overcharge active');return true}},
- blaster:{name:'Pulse Blaster',slot:'weapon',model:{archetype:'sidearm',materials:{accent:0x46e0d0}},drop:{pool:'gear',weight:1},scrap:10,desc:'Reliable sidearm.'},
- smg:{name:'Rapid SMG',slot:'weapon',model:{archetype:'compact',materials:{accent:0xff7048}},drop:{pool:'gear',weight:1},scrap:12,desc:'Fast and light.'},
- rifle:{name:'Heavy Rifle',slot:'weapon',model:{archetype:'rifle',materials:{accent:0xd5ae55}},drop:{pool:'gear',weight:1},scrap:16,desc:'One-shot drones.'},
- helm:{name:'Scout Helm',slot:'head',armor:2,drop:{pool:'gear',weight:1},scrap:5},vest:{name:'Dune Vest',slot:'chest',armor:4,drop:{pool:'gear',weight:1},scrap:8},
- gloves:{name:'Grip Gloves',slot:'arms',armor:1,drop:{pool:'gear',weight:1},scrap:4},belt:{name:'Utility Belt',slot:'waist',armor:1,drop:{pool:'gear',weight:1},scrap:4},
- greaves:{name:'Salt Greaves',slot:'legs',armor:2,speed:.05,drop:{pool:'gear',weight:1},scrap:6},boots:{name:'Runner Boots',slot:'feet',armor:1,speed:.1,drop:{pool:'gear',weight:1},scrap:5},
- core:{name:'Vital Core',slot:'artifact',hp:25,drop:{pool:'gear',weight:1},scrap:12,desc:'A warm, humming relic.'},
- spark:{name:'Spark Drone',slot:'companion',cdmg:1,iv:1.2,range:20,col:0x46e0d0,drop:{pool:'gear',weight:1},scrap:10},
- guard:{name:'Guard Drone',slot:'companion',cdmg:2,iv:2.2,range:20,col:0xffd23f,drop:{pool:'gear',weight:1},scrap:14},
- spectre:{name:'Spectre',slot:'companion',heal:.05,wait:5,interval:1,range:20,col:0x9d7cff,drop:{pool:'gear',weight:1},scrap:18,desc:'Heals you in 5% chunks every second after 5 seconds of no damage.'}};
+ medkit:{name:'Medkit',slot:'item',max:999,scrap:5,desc:'Restores 35 health.',use(){if(P.hp>=maxHp()){toast('Health is full');return false}setHp(P.hp+35);return true}},
+ boost:{name:'Overcharge',slot:'item',max:999,scrap:8,desc:'Doubles fire rate for 8s.',use(){boostT=8;toast('Overcharge active');return true}},
+ blaster:{name:'Pulse Blaster',slot:'weapon',model:{archetype:'sidearm',materials:{accent:0x46e0d0}},dmg:1,rate:.17,scrap:10,desc:'Reliable sidearm.'},
+ smg:{name:'Rapid SMG',slot:'weapon',model:{archetype:'compact',materials:{accent:0xff7048}},dmg:.6,rate:.08,scrap:12,desc:'Fast and light.'},
+ rifle:{name:'Heavy Rifle',slot:'weapon',model:{archetype:'rifle',materials:{accent:0xd5ae55}},dmg:2,rate:.38,scrap:16,desc:'One-shot drones.'},
+ helm:{name:'Scout Helm',slot:'head',armor:2,scrap:5},vest:{name:'Dune Vest',slot:'chest',armor:4,scrap:8},
+ gloves:{name:'Grip Gloves',slot:'arms',armor:1,scrap:4},belt:{name:'Utility Belt',slot:'waist',armor:1,scrap:4},
+ greaves:{name:'Salt Greaves',slot:'legs',armor:2,speed:.05,scrap:6},boots:{name:'Runner Boots',slot:'feet',armor:1,speed:.1,scrap:5},
+ core:{name:'Vital Core',slot:'artifact',hp:25,scrap:12,desc:'A warm, humming relic.'},
+ spark:{name:'Spark Drone',slot:'companion',cdmg:1,iv:1.2,range:20,col:0x46e0d0,scrap:10},
+ guard:{name:'Guard Drone',slot:'companion',cdmg:2,iv:2.2,range:20,col:0xffd23f,scrap:14},
+ spectre:{name:'Spectre',slot:'companion',heal:.05,wait:5,interval:1,range:20,col:0x9d7cff,scrap:18,desc:'Heals you in 5% chunks every second after 5 seconds of no damage.'}};
 const DEFAULT_SCRAP_VALUE=5;
 for(const item of Object.values(ITEMS))item.scrap??=DEFAULT_SCRAP_VALUE;
 const ABILITIES={
@@ -546,8 +526,8 @@ const ABILITIES={
 };
 let gunModelId;
 const WEAPON_ARCHETYPES={
-  base:{materials:{frame:0x303447,edge:0x171b28,accent:0x46e0d0,barrel:0x727c87},projectile:{speed:48,mass:.1,radius:.07,color:0x46e0d0},stats:{dmg:1,rate:.2,upgrade:{copies:10,scrap:25,maxLevel:5,damagePerLevel:.25}},muzzleZ:-.4,parts:[]},
-  sidearm:{extends:'base',projectile:{speed:48,mass:.09,radius:.075,color:0x46e0d0},stats:{dmg:1,rate:.17},muzzleZ:-.44,parts:[
+  base:{materials:{frame:0x303447,edge:0x171b28,accent:0x46e0d0,barrel:0x727c87},projectile:{speed:48,mass:.1,radius:.07,color:0x46e0d0},muzzleZ:-.4,parts:[]},
+  sidearm:{extends:'base',projectile:{speed:48,mass:.09,radius:.075,color:0x46e0d0},muzzleZ:-.44,parts:[
     {shape:'box',size:[.16,.16,.34],material:'frame',at:[0,0,.015]},
     {shape:'box',size:[.12,.1,.2],material:'edge',at:[0,.09,-.045]},
     {shape:'box',size:[.11,.23,.13],material:'edge',at:[0,-.15,.11],rotation:[-.18,0,0]},
@@ -556,7 +536,7 @@ const WEAPON_ARCHETYPES={
     {shape:'box',size:[.19,.035,.13],material:'edge',at:[0,.105,.105]},
     {shape:'box',size:[.17,.045,.08],material:'accent',at:[0,-.015,-.24]}
   ]},
-  compact:{extends:'base',projectile:{speed:48,mass:.045,radius:.055,color:0xff7048},stats:{dmg:.6,rate:.08,upgrade:{damagePerLevel:.2}},muzzleZ:-.64,parts:[
+  compact:{extends:'base',projectile:{speed:48,mass:.045,radius:.055,color:0xff7048},muzzleZ:-.64,parts:[
     {shape:'box',size:[.17,.18,.48],material:'frame',at:[0,0,0]},
     {shape:'box',size:[.13,.07,.23],material:'edge',at:[0,.12,-.03]},
     {shape:'box',size:[.12,.22,.14],material:'edge',at:[0,-.16,.08],rotation:[-.12,0,0]},
@@ -566,7 +546,7 @@ const WEAPON_ARCHETYPES={
     {shape:'box',size:[.19,.035,.31],material:'edge',at:[0,.145,-.03]},
     {shape:'box',size:[.12,.035,.055],material:'accent',at:[0,-.085,.01]}
   ]},
-  rifle:{extends:'base',materials:{frame:0x59614a,edge:0x252c26,barrel:0x798078},projectile:{speed:72,mass:.32,radius:.11,color:0xd5ae55},stats:{dmg:2,rate:.38,upgrade:{damagePerLevel:.35}},muzzleZ:-.84,parts:[
+  rifle:{extends:'base',materials:{frame:0x59614a,edge:0x252c26,barrel:0x798078},projectile:{speed:72,mass:.32,radius:.11,color:0xd5ae55},muzzleZ:-.84,parts:[
     {shape:'box',size:[.18,.2,.54],material:'frame',at:[0,0,.02]},
     {shape:'box',size:[.15,.12,.26],material:'edge',at:[0,-.025,.37]},
     {shape:'box',size:[.13,.24,.15],material:'edge',at:[0,-.19,.04],rotation:[-.08,0,0]},
@@ -580,10 +560,10 @@ const WEAPON_ARCHETYPES={
 };
 function resolveWeaponArchetype(name,seen=new Set()){
   const definition=WEAPON_ARCHETYPES[name]||WEAPON_ARCHETYPES.sidearm;
-  if(seen.has(name))return{materials:{},parts:[],projectile:{},stats:{},muzzleZ:-.4,scale:1};
+  if(seen.has(name))return{materials:{},parts:[],projectile:{},muzzleZ:-.4,scale:1};
   const chain=new Set(seen);chain.add(name);
-  const parent=definition.extends?resolveWeaponArchetype(definition.extends,chain):{materials:{},parts:[],projectile:{},stats:{},muzzleZ:-.4,scale:1};
-  return{materials:{...parent.materials,...definition.materials},parts:[...parent.parts,...(definition.parts||[])],projectile:{...parent.projectile,...definition.projectile},stats:{...parent.stats,...definition.stats,upgrade:{...parent.stats.upgrade,...definition.stats?.upgrade}},muzzleZ:definition.muzzleZ??parent.muzzleZ,scale:parent.scale*(definition.scale||1)};
+  const parent=definition.extends?resolveWeaponArchetype(definition.extends,chain):{materials:{},parts:[],projectile:{},muzzleZ:-.4,scale:1};
+  return{materials:{...parent.materials,...definition.materials},parts:[...parent.parts,...(definition.parts||[])],projectile:{...parent.projectile,...definition.projectile},muzzleZ:definition.muzzleZ??parent.muzzleZ,scale:parent.scale*(definition.scale||1)};
 }
 function makeGunModel(id){
   const variant=ITEMS[id].model||{},base=resolveWeaponArchetype(variant.archetype||'sidearm');
@@ -604,33 +584,28 @@ function syncGunModel(){
   while(gun.children.length)gun.remove(gun.children[0]);
   if(id)gun.add(makeGunModel(id));
 }
-const GEAR=Object.keys(ITEMS).filter(k=>ITEMS[k].drop?.pool==='gear'&&ITEMS[k].drop.weight>0);
-const DROP={chance:.45,weights:{scrap:.55,items:.37,gear:.08}};
+const GEAR=Object.keys(ITEMS).filter(k=>ITEMS[k].slot&&ITEMS[k].slot!=='item'&&k!=='blaster');
+const DROP={chance:.45,scrap:.55,medkit:.22,boost:.15}; // gear gets whatever is left
 const PCOL={medkit:0x46e0d0,boost:0xff3d6e,scrap:0xcfcfcf};
-const maxOf=id=>(ITEMS[id].max ?? (ITEMS[id].slot&&ITEMS[id].slot!=='item'&&ITEMS[id].slot!=='weapon'?1:999));
+const maxOf=id=>(ITEMS[id].max ?? ((ITEMS[id].slot && ITEMS[id].slot!=='item')?1:999));
 // Repair saves that reference items or abilities that no longer exist, or hold impossible values
-(function sanitizeSave(){
-  INV.slots=INV.slots.filter(x=>ITEMS[x.id]&&x.n>0).map(x=>({id:x.id,n:Math.min(Math.floor(x.n),maxOf(x.id))})).slice(0,INV.cap);
+function sanitizeSave(){
+  const own=(o,k)=>Object.prototype.hasOwnProperty.call(o,k);
+  INV.cap=Math.min(48,Math.max(24,Math.floor(+INV.cap||24)));
+  INV.slots=INV.slots.filter(x=>own(ITEMS,x.id)&&x.n>0).map(x=>({id:x.id,n:Math.min(Math.floor(x.n),maxOf(x.id))})).slice(0,INV.cap);
   EQ.weapons=[0,1,2].map(i=>ITEMS[EQ.weapons[i]]?.slot==='weapon'?EQ.weapons[i]:null);
   EQ.itemSlots=[0,1].map(i=>ITEMS[EQ.itemSlots[i]]?.slot==='item'?EQ.itemSlots[i]:null);
   ARMOR_SLOTS.forEach(k=>{if(ITEMS[EQ.armor[k]]?.slot!==k)EQ.armor[k]=null});
   if(ITEMS[EQ.companion]?.slot!=='companion')EQ.companion=null;
-  ABIL.items=ABIL.items.filter(id=>ABILITIES[id]);
+  ABIL.items=ABIL.items.filter(id=>own(ABILITIES,id));
   if(!ABIL.items.includes(EQ.jumpType))EQ.jumpType=ABIL.items.includes('basicJump')?'basicJump':null;
-  Store.data.weaponLevels=Store.data.weaponLevels||{};
-  Object.keys(Store.data.weaponLevels).forEach(id=>{
-    if(ITEMS[id]?.slot!=='weapon')delete Store.data.weaponLevels[id];
-    else Store.data.weaponLevels[id]=Math.max(0,Math.min(weaponStats(id).upgrade.maxLevel??5,Math.floor(+Store.data.weaponLevels[id]||0)));
-  });
   WAL.scrap=Math.max(0,Math.min(SCRAP_CAP,Math.floor(+WAL.scrap||0)));
-})();
-function weaponStats(id){
-  const item=ITEMS[id];if(item?.slot!=='weapon')return null;
-  const defaults=resolveWeaponArchetype(item.model?.archetype||'sidearm').stats;
-  const upgrade={...defaults.upgrade,...item.upgrade};
-  const level=Store.data.weaponLevels[id]||0;
-  return{dmg:(item.dmg??defaults.dmg??1)+level*(upgrade.damagePerLevel||0),rate:item.rate??defaults.rate??.2,level,upgrade};
+  const cl=(v,a,b,d)=>Number.isFinite(+v)?Math.max(a,Math.min(b,+v)):d;
+  OPT.sens=cl(OPT.sens,.3,2.5,1);OPT.vol=cl(OPT.vol,0,1,.7);OPT.fov=cl(OPT.fov,60,100,75);OPT.invert=!!OPT.invert;OPT.dev=!!OPT.dev;
+  const dk=Store.defaults().keys;Object.keys(dk).forEach(k=>{if(typeof B[k]!=='string'||!B[k])B[k]=dk[k]});
+  ['kills','runs'].forEach(k=>{const v=Math.floor(+Store.data.stats[k]);Store.data.stats[k]=v>0?v:0});
 }
+sanitizeSave();
 const bonus=k=>ARMOR_SLOTS.reduce((t,s)=>t+((ITEMS[EQ.armor[s]]||{})[k]||0),0);
 const maxHp=()=>100+bonus('hp'),armorRed=()=>{const a=bonus('armor');return a/(a+40)};
 const wk=c=>Object.keys(B).find(k=>B[k]===c)||'';
@@ -645,19 +620,6 @@ function addItem(id,n){
   return n;
 }
 function removeItem(id){const i=INV.slots.findIndex(s=>s.id===id);if(i<0)return;if(--INV.slots[i].n<=0)INV.slots.splice(i,1)}
-function removeItems(id,n){
-  for(let i=INV.slots.length-1;i>=0&&n>0;i--)if(INV.slots[i].id===id){
-    const take=Math.min(n,INV.slots[i].n);INV.slots[i].n-=take;n-=take;
-    if(INV.slots[i].n<=0)INV.slots.splice(i,1);
-  }
-  return n===0;
-}
-function upgradeWeapon(id){
-  const stats=weaponStats(id);if(!stats)return false;
-  const {copies=10,scrap=25,maxLevel=5}=stats.upgrade,level=stats.level,cost=scrap*(level+1);
-  if(level>=maxLevel||count(id)<copies||WAL.scrap<cost)return false;
-  removeItems(id,copies);WAL.scrap-=cost;Store.data.weaponLevels[id]=level+1;save();syncHud();return true;
-}
 function useItem(id){
   const it=ITEMS[id];if(!it.use||!count(id)||!it.use())return false;
   removeItem(id);beep(660,.2,'sine',.08);save();refreshQuick();return true;
@@ -665,7 +627,7 @@ function useItem(id){
 // New gear goes straight into a matching empty slot (never when returning items from the inventory screen)
 function autoEquip(id){
   const it=ITEMS[id];
-  if(it.slot==='weapon'){if(EQ.weapons.includes(id))return false;const i=EQ.weapons.indexOf(null);if(i<0)return false;EQ.weapons[i]=id;return true}
+  if(it.slot==='weapon'){const i=EQ.weapons.indexOf(null);if(i<0)return false;EQ.weapons[i]=id;return true}
   if(it.slot==='companion'){if(EQ.companion)return false;EQ.companion=id;refreshCompanion();return true}
   if(ARMOR_SLOTS.includes(it.slot)){if(EQ.armor[it.slot])return false;EQ.armor[it.slot]=id;return true}
   return false;
@@ -686,24 +648,12 @@ function collect(k,q){
   return false;
 }
 function dropLoot(pos){
-  if(Math.random()>DROP.chance)return;const r=Math.random(),{scrap,items}=DROP.weights;let id,n=1;
-  if(r<scrap){id='scrap';n=Math.ceil((2+Math.random()*4)*wave)}
-  else if(r<scrap+items)id=pickFromPool('items');
-  else id=pickFromPool('gear');
-  if(!id)return;
+  if(Math.random()>DROP.chance)return;const r=Math.random();let id,n=1;
+  if(r<DROP.scrap){id='scrap';n=Math.ceil((2+Math.random()*4)*wave)}else if(r<DROP.scrap+DROP.medkit)id='medkit';else if(r<DROP.scrap+DROP.medkit+DROP.boost)id='boost';else id=GEAR[Math.floor(Math.random()*GEAR.length)];
   const c=PCOL[id]||0xb58cff;
   const m=new THREE.Mesh(new THREE.BoxGeometry(.35,.35,.35),new THREE.MeshLambertMaterial({color:c,emissive:c,emissiveIntensity:.4}));
   m.position.set(pos.x,.6,pos.z);scene.add(m);pickups.push({m,id,n,t:30});
 }
-function pickFromPool(pool){
-  const entries=Object.keys(ITEMS).filter(id=>ITEMS[id].drop?.pool===pool&&ITEMS[id].drop.weight>0);
-  const total=entries.reduce((sum,id)=>sum+ITEMS[id].drop.weight,0);
-  if(!total)return null;
-  let roll=Math.random()*total;
-  for(const id of entries){roll-=ITEMS[id].drop.weight;if(roll<0)return id}
-  return entries[entries.length-1]||null;
-}
-const pickGear=()=>pickFromPool('gear');
 // End-of-area pickup: collect everything left on the ground; anything that does not fit is salvaged for scrap
 const warnEl=$('warn');
 function autoCollect(){
@@ -774,7 +724,7 @@ $('qm').onclick=()=>useBoundItem('item1');$('qb').onclick=()=>useBoundItem('item
 
 // Key rebinding
 const ACTIONS=[['forward','Move forward'],['back','Move back'],['left','Strafe left'],['right','Strafe right'],['sprint','Sprint'],['jump','Jump'],['pause','Pause'],['inventory','Inventory'],['map','Open map'],['use','Use'],['item1','Item 1'],['item2','Item 2'],['w1','Weapon 1'],['w2','Weapon 2'],['w3','Weapon 3'],['compendium','Compendium']];
-let rebind=null,mapOpen=false,mapBack=null;
+let rebind=null,mapOpen=false,mapBack=null,menuEsc=null,pausedAt=0;
 function onKey(e){
   if(rebind){
     e.preventDefault();const r=rebind;rebind=null;
@@ -783,6 +733,8 @@ function onKey(e){
   }
   if(compOpen()&&(e.code===B.compendium||e.code==='Escape')){e.preventDefault();closeComp();return}
   if(invOpen()&&(e.code===B.inventory||e.code==='Escape')){e.preventDefault();closeInv();return}
+  if(warnEl.classList.contains('on')&&e.code==='Escape'){e.preventDefault();warnEl.querySelector('[data-w="skip"]').click();return}
+  if(ov.style.display!=='none'&&menuEsc&&(e.code==='Escape'||(e.code===B.pause&&menuEsc===resume))&&performance.now()-pausedAt>250){e.preventDefault();menuEsc();return}
   if(mapOpen&&(e.code==='Escape'||e.code===B.map)){e.preventDefault();leaveMap();return}
   keys[e.code]=true;
   if(state!=='play')return;
@@ -797,7 +749,7 @@ function onKey(e){
   else if(e.code===B.item2)useBoundItem('item2');
 }
 function controls(back){
-  screen('Controls','Pick an action, then press the new key. Esc cancels. Mouse click fires; hold right mouse to aim down sights.');
+  screen('Controls','Pick an action, then press the new key. Esc cancels. Mouse click fires; hold right mouse to aim down sights.',()=>options(back));
   ACTIONS.forEach(([a,label])=>btn(label+': '+keyName(B[a]),()=>{
     rebind={a,back};screen('Press a key','Rebinding "'+label+'". Esc cancels.');
     btn('Cancel',()=>{rebind=null;controls(back)});
@@ -813,10 +765,7 @@ const refSlot=r=>r[0]==='w'?EQ.weapons[r[1]]:r[0]==='a'?EQ.armor[r[1]]:r[0]==='i
 const setRef=(r,id)=>{if(r[0]==='w')EQ.weapons[r[1]]=id;else if(r[0]==='a')EQ.armor[r[1]]=id;else if(r[0]==='i')EQ.itemSlots[r[1]]=id;else if(r[0]==='j')EQ.jumpType=id;else EQ.companion=id};
 function info(id){
   const t=ITEMS[id]||ABILITIES[id],p=[];
-  if(t.slot==='weapon'){
-    const w=weaponStats(id);p.push('Level '+w.level+' / '+w.upgrade.maxLevel,`Damage ${w.dmg}`,`${(1/w.rate).toFixed(1)} shots/s`);
-  }else{if(t.dmg)p.push('Damage '+t.dmg);if(t.rate)p.push((1/t.rate).toFixed(1)+' shots/s')}
-  if(t.armor)p.push('Armor +'+t.armor);
+  if(t.dmg)p.push('Damage '+t.dmg);if(t.rate)p.push((1/t.rate).toFixed(1)+' shots/s');if(t.armor)p.push('Armor +'+t.armor);
   if(t.hp)p.push('Max health +'+t.hp);if(t.speed)p.push('Speed +'+Math.round(t.speed*100)+'%');if(t.cdmg)p.push('Assist '+t.cdmg+' dmg every '+t.iv+'s');
   if(t.heal)p.push('Heals '+Math.round(t.heal*100)+'% max HP every '+t.interval+'s after '+t.wait+'s of no damage');
   if(t.jumpVelocity)p.push('Jump velocity '+t.jumpVelocity);
@@ -824,9 +773,9 @@ function info(id){
   if(t.glideDecay)p.push('Press Jump in midair to activate logarithmic glide');
   return (t.desc?t.desc+' ':'')+p.join(', ');
 }
-function cell(a,k,label,id,extra,sel){const item=ITEMS[id]||ABILITIES[id],level=item?.slot==='weapon'?`<small>Level ${weaponStats(id).level}</small>`:'';return `<button class="cell ${id?'':'empty'} ${sel?'sel':''}" data-a="${a}" data-k="${k}"><small>${label}</small>${item?item.name:'Empty'}${level}${extra||''}</button>`}
+function cell(a,k,label,id,extra,sel){const item=ITEMS[id]||ABILITIES[id];return `<button class="cell ${id?'':'empty'} ${sel?'sel':''}" data-a="${a}" data-k="${k}"><small>${label}</small>${item?item.name:'Empty'}${extra||''}</button>`}
 function renderInv(){
-  const mh=maxHp(),w=weaponStats(EQ.weapons[wSel]),c=ITEMS[EQ.companion],S=Store.data.stats;
+  const mh=maxHp(),w=ITEMS[EQ.weapons[wSel]],c=ITEMS[EQ.companion],S=Store.data.stats;
   let id=null;if(invSel)id=invSel.a==='bag'?(INV.slots[+invSel.k]||{}).id:invSel.a==='ability'?invSel.k:refSlot(refOf(invSel.k));
   if(!id)invSel=null;
   const sel=(a,k)=>invSel&&invSel.a===a&&invSel.k==k;
@@ -866,13 +815,6 @@ function renderInv(){
       if(invSel.k[0]==='j')h+=`<span>Abilities cannot be discarded or dismantled.</span>`;
       else if(invSel.k[0]!=='i'||count(id)>0)h+=`<button class="cell" data-a="dismantle">Dismantle (+${it.scrap??DEFAULT_SCRAP_VALUE} scrap)</button>`;
     }
-    if(it.slot==='weapon'){
-      const stats=weaponStats(id),copies=stats.upgrade.copies??10,cost=(stats.upgrade.scrap??25)*(stats.level+1);
-      if(stats.level<(stats.upgrade.maxLevel??5)){
-        const ready=count(id)>=copies&&WAL.scrap>=cost;
-        h+=`<button class="cell" data-a="upgrade" ${ready?'':'disabled'}>Upgrade to level ${stats.level+1} (${count(id)}/${copies} copies, ${cost} scrap)</button>`;
-      }else h+=`<span>Maximum level reached.</span>`;
-    }
     h+=`</div></section>`;
   }
   invEl.innerHTML=h+'</div>';
@@ -883,10 +825,7 @@ invEl.onclick=e=>{
   if(a==='close')return closeInv();
   if(a==='bag'||a==='eq'||a==='ability'){invSel={a,k};return renderInv()}
   const i=invSel&&+invSel.k;
-  const selectedId=invSel&&(invSel.a==='bag'?(INV.slots[i]||{}).id:invSel.a==='ability'?invSel.k:refSlot(refOf(invSel.k)));
-  if(a==='upgrade'){
-    if(upgradeWeapon(selectedId))toast(ITEMS[selectedId].name+' upgraded to level '+weaponStats(selectedId).level);
-  }else if(a==='equip'){
+  if(a==='equip'){
     if(invSel.a==='ability'){EQ.jumpType=invSel.k;invSel=null;afterInv();return}
     const s=INV.slots[i],it=ITEMS[s.id],id=s.id;
     let r;
@@ -935,17 +874,7 @@ const WORLDS=[
   {id:'cinder',name:'Cinder Gate',x:20,y:50,to:['vents','forge'],crates:10,waves:4,speed:1.5,sky:0x3a1a1a,fog:0xa04a3a,desc:'Ash drifts across the old border.'},
   {id:'vents',name:'Vent Fields',x:65,y:25,to:['core'],crates:6,waves:5,speed:1.55,sky:0x421f14,fog:0xc0603a,desc:'Hot, open, and loud.'},
   {id:'forge',name:'Dead Forge',x:65,y:78,to:['core'],crates:24,waves:5,speed:1.55,sky:0x2a1a24,fog:0x8a4a5a,desc:'Slag walls make a cramped fight.'},
-  {id:'core',name:'Ember Core',x:125,y:52,to:[],crates:12,waves:7,speed:1.8,sky:0x4a1a10,fog:0xe0703a,final:true,desc:'The source of the swarm.'}]},
- {id:'earth',name:'Earth',start:'russia',submenu:true,menuTitle:'Earth Destinations',nodes:[
-  {id:'russia',name:'Russia',x:25,y:28,to:['chicago'],crates:0,waves:1,speed:1,sky:0x26334a,fog:0x60718a,desc:'Placeholder destination on Earth.'},
-  {id:'chicago',name:'Chicago',x:80,y:72,to:['germany'],crates:0,waves:1,speed:1,sky:0x26334a,fog:0x60718a,desc:'Placeholder destination on Earth.'},
-  {id:'germany',name:'Germany',x:135,y:28,to:[],crates:0,waves:1,speed:1,sky:0x26334a,fog:0x60718a,final:true,desc:'Placeholder destination on Earth.'}]},
- {id:'luna',name:'Luna',start:'luna',nodes:[
-  {id:'luna',name:'Luna',x:80,y:50,to:[],crates:0,waves:1,speed:1,sky:0x263044,fog:0x57647a,final:true,desc:'Placeholder lunar destination.'}]},
- {id:'venus',name:'Venus',start:'venus',nodes:[
-  {id:'venus',name:'Venus',x:80,y:50,to:[],crates:0,waves:1,speed:1,sky:0x4a3026,fog:0x9a694d,final:true,desc:'Placeholder Venus destination.'}]},
- {id:'mars',name:'Mars',start:'mars',nodes:[
-  {id:'mars',name:'Mars',x:80,y:50,to:[],crates:0,waves:1,speed:1,sky:0x48251f,fog:0x9a5140,final:true,desc:'Placeholder Mars destination.'}]}];
+  {id:'core',name:'Ember Core',x:125,y:52,to:[],crates:12,waves:7,speed:1.8,sky:0x4a1a10,fog:0xe0703a,final:true,desc:'The source of the swarm.'}]}];
 const NODES=WORLDS.flatMap(w=>w.nodes);WORLDS.forEach(w=>w.nodes.forEach(n=>n.w=w));
 const nodeById=id=>NODES.find(n=>n.id===id)||NODES[0];
 const nbrs=n=>n.w.nodes.filter(m=>n.to.includes(m.id)||m.to.includes(n.id));
@@ -962,7 +891,7 @@ function save(){Store.save()}
 function applyOpts(){camera.fov=OPT.fov;camera.updateProjectionMatrix()}applyOpts();
 function unlockAudio(){try{ac=ac||new (window.AudioContext||window.webkitAudioContext)();if(ac.state==='suspended')ac.resume()}catch(e){}}
 function release(){firing=false;aiming=false;jumpPressed=false;if(document.exitPointerLock&&document.pointerLockElement)document.exitPointerLock()}
-function screen(title,msg){$('t').textContent=title;$('m').textContent=msg||'';menu.innerHTML='';menu.className='';mapOpen=false;setMapBackZones(false);ov.style.display='flex';$('pb').classList.remove('on');$('quick').classList.remove('on')}
+function screen(title,msg,esc){menuEsc=esc||null;$('t').textContent=title;$('m').textContent=msg||'';menu.innerHTML='';menu.className='';mapOpen=false;setMapBackZones(false);ov.style.display='flex';$('pb').classList.remove('on');$('quick').classList.remove('on')}
 function btn(label,fn,cls,off){const b=document.createElement('button');b.textContent=label;b.className=cls||'';b.disabled=!!off;b.onclick=()=>{unlockAudio();fn()};menu.appendChild(b);return b}
 function slider(label,key,min,max,step,fmt){
   const l=document.createElement('label'),v=document.createElement('span'),i=document.createElement('input');
@@ -972,29 +901,25 @@ function slider(label,key,min,max,step,fmt){
 }
 function goHome(){enterHome();resume()}
 function worldOverview(back){
-  screen('Sol Navigation Map','');
+  screen('Sol Navigation Map','',leaveMap);
   const returnTo=back||pause,previous=()=>worldOverview(returnTo);mapBack=returnTo;
   const columns=2,rowH=108,height=Math.ceil(WORLDS.length/columns)*rowH;
   let h=`<svg viewBox="0 0 320 ${height}" role="group" aria-label="All worlds and destinations">`;
   WORLDS.forEach((w,index)=>{
     const ox=(index%columns)*160+3,oy=Math.floor(index/columns)*rowH+3;
-    const open=worldOpen(w);
-    if(w.submenu){
-      h+=`<g data-world-map="${w.id}" tabindex="0" role="button" aria-label="Open ${w.menuTitle}" style="cursor:pointer"><rect x="${ox}" y="${oy}" width="154" height="102" rx="3" fill="${open?'#46e0d022':'#7b858c22'}" stroke="${open?'#46e0d0':'#7b858c'}" stroke-opacity=".65"/><text x="${ox+77}" y="${oy+29}" text-anchor="middle" font-size="9" font-weight="700" fill="${open?'#46e0d0':'#a3adb2'}">${w.name}</text><circle cx="${ox+77}" cy="${oy+55}" r="12" fill="#46e0d022" stroke="${open?'#46e0d0':'#7b858c'}"/><text x="${ox+77}" y="${oy+58}" text-anchor="middle" font-size="8" fill="#fff4dc">E</text><text x="${ox+77}" y="${oy+82}" text-anchor="middle" font-size="6" fill="${open?'#fff4dc':'#a3adb2'}">${w.nodes.length} destinations</text></g>`;
-      return;
-    }
     const minX=Math.min(...w.nodes.map(n=>n.x)),maxX=Math.max(...w.nodes.map(n=>n.x));
     const minY=Math.min(...w.nodes.map(n=>n.y)),maxY=Math.max(...w.nodes.map(n=>n.y));
     const px=n=>ox+8+(n.x-minX)/(maxX-minX||1)*136;
     const py=n=>oy+29+(n.y-minY)/(maxY-minY||1)*48;
+    const open=worldOpen(w);
     h+=`<rect x="${ox}" y="${oy}" width="154" height="102" rx="3" fill="#ffffff08" stroke="${open?'#46e0d0':'#7b858c'}" stroke-opacity=".65"/>`;
-    h+=`<g data-world-map="${w.id}" tabindex="0" role="button" aria-label="Open ${w.name}" style="cursor:pointer"><rect x="${ox+1}" y="${oy+1}" width="152" height="19" fill="${open?'#46e0d022':'#7b858c22'}"/><text x="${ox+6}" y="${oy+13}" font-size="7" font-weight="700" fill="${open?'#46e0d0':'#a3adb2'}">${w.name}</text></g>`;
+    h+=`<g data-world-map="${w.id}" tabindex="0" role="button" aria-label="Open ${w.name}${open?'':' (locked)'}" style="cursor:pointer"><rect x="${ox+1}" y="${oy+1}" width="152" height="19" fill="${open?'#46e0d022':'#7b858c22'}"/><text x="${ox+6}" y="${oy+13}" font-size="7" font-weight="700" fill="${open?'#46e0d0':'#a3adb2'}">${w.name}${open?'':' (locked)'}</text></g>`;
     w.nodes.forEach(n=>nbrs(n).forEach(m=>{if(n.id<m.id)h+=`<line x1="${px(n)}" y1="${py(n)}" x2="${px(m)}" y2="${py(m)}" stroke="${isDone(n)||isDone(m)?'#46e0d0':'#7b858c'}" stroke-opacity=".65" stroke-width="1"/>`}));
     w.nodes.forEach(n=>{
       const available=canGo(n),done=isDone(n),here=n===LV;
       const fill=done?'#ffd23f':available?'#46e0d0':'#515b63';
       const stroke=here?'#fff4dc':done?'#ffd23f':available?'#46e0d0':'#7b858c';
-      h+=`<g data-map-node="${n.id}" tabindex="0" role="button" aria-label="${n.name}${done?', cleared':''}" style="cursor:pointer"><circle cx="${px(n)}" cy="${py(n)}" r="${n.final?4.3:3.5}" fill="${fill}" stroke="${stroke}" stroke-width="${here?1.5:1}"/><text x="${px(n)}" y="${py(n)+8}" text-anchor="middle" font-size="4.2" font-weight="700" fill="${available||done?'#fff4dc':'#a3adb2'}">${n.name}</text>${n.final?`<text x="${px(n)}" y="${py(n)+1.5}" text-anchor="middle" font-size="3.5" fill="#1b1d3d">&#9733;</text>`:''}</g>`;
+      h+=`<g data-map-node="${n.id}" tabindex="0" role="button" aria-label="${n.name}, ${available?'open':'locked'}${done?', cleared':''}" style="cursor:pointer"><circle cx="${px(n)}" cy="${py(n)}" r="${n.final?4.3:3.5}" fill="${fill}" stroke="${stroke}" stroke-width="${here?1.5:1}"/><text x="${px(n)}" y="${py(n)+8}" text-anchor="middle" font-size="4.2" font-weight="700" fill="${available||done?'#fff4dc':'#a3adb2'}">${n.name}</text>${n.final?`<text x="${px(n)}" y="${py(n)+1.5}" text-anchor="middle" font-size="3.5" fill="#1b1d3d">&#9733;</text>`:''}</g>`;
     });
   });
   menu.innerHTML=h+'</svg>';menu.className='map';mapOpen=true;setMapBackZones(true);
@@ -1011,54 +936,29 @@ function worldMap(w,sel,back){
   if(!w)return worldOverview(back);
   mapBack=back||pause;
   sel=sel||(w===LV.w?LV:null);const wi=WORLDS.indexOf(w);
-  const details=sel?sel.name+': '+sel.desc+' '+sel.waves+' waves'+(isDone(sel)?'. Cleared, best '+PROG.done[sel.id]+'.':''):'Pick a destination on the map.';
-  screen(w.menuTitle||w.name,details);
+  const details=sel?sel.name+': '+sel.desc+' '+sel.waves+' waves'+(isDone(sel)?'. Cleared, best '+PROG.done[sel.id]+'.':canGo(sel)?'. Open destination.':'. Locked destination.'):'Pick a destination on the map.';
+  screen(w.name,details,leaveMap);
   let h='<svg viewBox="0 0 160 100" role="group" aria-label="World map">';
   w.nodes.forEach(n=>nbrs(n).forEach(m=>{if(n.id<m.id){const ok=isDone(n)||isDone(m);h+=`<line x1="${n.x}" y1="${n.y}" x2="${m.x}" y2="${m.y}" stroke="${ok?'#46e0d0':'#fff5'}" stroke-width="1.4" ${ok?'':'stroke-dasharray="3 3"'}/>`}}));
   w.nodes.forEach(n=>{
     const g=canGo(n),d=isDone(n),here=n===LV;
-    h+=`<g data-n="${n.id}" ${g?'tabindex="0" role="button" style="cursor:pointer"':'opacity=".4"'} aria-label="${n.name}"><circle cx="${n.x}" cy="${n.y}" r="${n===sel?9:7}" fill="${d?'#ffd23f':g?'#1b1d3d':'#515b63'}" stroke="${here?'#fff4dc':d?'#ffd23f':g?'#46e0d0':'#7b858c'}" stroke-width="${here?2.6:1.6}"/>${n.final?`<text x="${n.x}" y="${n.y+2.6}" text-anchor="middle" font-size="7" fill="${d?'#1b1d3d':g?'#ffd23f':'#a3adb2'}">&#9733;</text>`:''}<text x="${n.x}" y="${n.y+16}" text-anchor="middle" font-size="5.5" font-weight="700" fill="${g||d?'#fff4dc':'#a3adb2'}">${n.name}</text></g>`;
+    h+=`<g data-n="${n.id}" ${g?'tabindex="0" role="button" style="cursor:pointer"':'opacity=".4"'} aria-label="${n.name}${g?'':' (locked)'}"><circle cx="${n.x}" cy="${n.y}" r="${n===sel?9:7}" fill="${d?'#ffd23f':'#1b1d3d'}" stroke="${here?'#fff4dc':g?'#46e0d0':'#fff6'}" stroke-width="${here?2.6:1.6}"/>${n.final?`<text x="${n.x}" y="${n.y+2.6}" text-anchor="middle" font-size="7" fill="${d?'#1b1d3d':'#ffd23f'}">&#9733;</text>`:''}<text x="${n.x}" y="${n.y+16}" text-anchor="middle" font-size="5.5" font-weight="700" fill="#fff4dc">${n.name}</text></g>`;
   });
   menu.innerHTML=h+'</svg>';menu.className='map';mapOpen=true;setMapBackZones(true);
   menu.querySelectorAll('g[data-n]').forEach(g=>{const n=nodeById(g.dataset.n);const f=()=>worldMap(w,n,back);g.onclick=f;g.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();f()}}});
   if(sel&&canGo(sel)&&!(sel===LV&&state==='paused'&&!inHome))btn('Travel to '+sel.name,()=>{mapOpen=false;mapBack=null;setMapBackZones(false);enterArea(sel,null,false)},'main');
 }
 function options(back){
-  screen('Options','Saved on this device.');
+  screen('Options','Saved on this device.',back);
   slider('Look sensitivity','sens',.3,2.5,.1,v=>v.toFixed(1)+'x');
   slider('Volume','vol',0,1,.05,v=>Math.round(v*100)+'%');
   slider('Field of view','fov',60,100,1,v=>v+'\u00b0');
   const c=btn('Invert vertical look: '+(OPT.invert?'On':'Off'),()=>{OPT.invert=!OPT.invert;save();options(back)});
   btn('Developer options: '+(OPT.dev?'On':'Off'),()=>{OPT.dev=!OPT.dev;syncDev();save();options(back)});
-  btn('Export / import save',()=>saveTransfer(back));
   btn('Controls',()=>controls(back));
+  btn('Save data: export or import',()=>saveMenu(back));
   btn('Reset all save data',()=>{Store.reset();applyOpts();syncHud();syncDev();options(back)});
   btn('Back',back);
-}
-function saveTransfer(back,message){
-  screen('Save export / import',message||'Export your progress as a JSON file, or import a save file. Import replaces the current save.');
-  btn('Export save file',()=>{
-    try{
-      const blob=new Blob([JSON.stringify(Store.data,null,2)],{type:'application/json'});
-      const url=URL.createObjectURL(blob),a=document.createElement('a');
-      a.href=url;a.download='salt-flats-save.json';document.body.appendChild(a);a.click();a.remove();
-      setTimeout(()=>URL.revokeObjectURL(url),1000);saveTransfer(back,'Save exported as salt-flats-save.json.');
-    }catch(e){saveTransfer(back,'Export failed: '+e.message)}
-  },'main');
-  btn('Import save file',()=>{
-    const input=document.createElement('input');input.type='file';input.accept='.json,application/json';input.hidden=true;menu.appendChild(input);
-    input.onchange=async()=>{
-      const file=input.files?.[0];input.remove();if(!file)return;
-      try{
-        if(file.size>1048576)throw new Error('Save file is too large (maximum 1 MB).');
-        const raw=await file.text();
-        if(!confirm('Import this save and replace your current progress?'))return;
-        Store.import(raw);location.reload();
-      }catch(e){saveTransfer(back,'Import failed: '+e.message)}
-    };
-    input.click();
-  });
-  btn('Back',()=>options(back));
 }
 // Compendium: in-game documentation generated from live game data
 const compEl=$('comp');let compTab='basics',compBack=null;
@@ -1067,30 +967,30 @@ const tbl=(h,r)=>`<table><tr>${h.map(x=>`<th>${x}</th>`).join('')}</tr>${r.map(w
 const status=id=>EQ.weapons.includes(id)||Object.values(EQ.armor).includes(id)||EQ.companion===id?'Equipped':count(id)?'In backpack':'Not found yet';
 const ofKind=f=>Object.keys(ITEMS).filter(k=>f(ITEMS[k]));
 const r1=x=>Math.round(x*10)/10;
-const gearPct=()=>DROP.weights.gear;
+const gearPct=()=>1-DROP.scrap-DROP.medkit-DROP.boost;
 const COMP=[
 ['basics','Basics',()=>`<h3>Goal</h3><p>Drones have overrun the flats. Home is your safe base. Travel out on the map, clear each area of its drone waves, and push on to a world's final area (marked with a star) to open the next world.</p>
 <h3>Controls</h3>${tbl(['Action','Key'],[['Move',[B.forward,B.left,B.back,B.right].map(keyName).join(' ')+' or arrow keys'],['Look','Mouse (click the game to capture it)'],['Fire','Mouse click'],['Aim down sights','Hold right mouse button'],...ACTIONS.filter(a=>!['forward','back','left','right'].includes(a[0])).map(([a,l])=>[l,keyName(B[a])]),['Pause, or close a menu','Esc']])}
 <p>Change any keyboard action in Options, then Controls. Mouse click, right mouse, and Esc are fixed.</p>
 <h3>Touch</h3><p>Use the left stick to move, drag the right side of the screen to look, tap JUMP to leap or activate Glide in midair, hold Fire to shoot, and hold AIM to zoom and steady your weapon. The II button pauses. The item buttons at the top left use medkits and Overcharge and open the inventory.</p>`],
-['worlds','Worlds and map',()=>`<h3>How travel works</h3><p>Each world is a map of areas joined by paths. Open the map with ${keyName(B.map)}, from the pause menu, or at the Map pad at Home. Pick an available area and travel there. The first area of a world is always available. Other areas open once a neighboring area is cleared. A world opens when the final area of the world before it is cleared.</p>
+['worlds','Worlds and map',()=>`<h3>How travel works</h3><p>Each world is a map of areas joined by paths. Open the map with ${keyName(B.map)}, from the pause menu, or at the Map pad at Home. Pick an open area and travel there. The first area of a world is always open. Other areas open once a neighboring area is cleared. A world opens when the final area of the world before it is cleared.</p>
 <p>You clear an area by defeating all of its waves. Gates then appear on its edge, one for each path, labeled with where it leads. Walk into a gate to travel. Cleared areas are peaceful when you return. Use Restart area in the pause menu to fight there again.</p>
-${WORLDS.map(w=>`<h3>${w.name}</h3>${tbl(['Area','Waves','Drone speed','Crates','Status','Best score'],w.nodes.map(n=>[n.name+(n.final?' \u2605':''),n.waves,'x'+n.speed,n.crates,isDone(n)?'Cleared':canGo(n)?'Open':'-',PROG.done[n.id]??'-']))}`).join('')}`],
+${WORLDS.map(w=>`<h3>${w.name}${worldOpen(w)?'':' (locked)'}</h3>${tbl(['Area','Waves','Drone speed','Crates','Status','Best score'],w.nodes.map(n=>[n.name+(n.final?' \u2605':''),n.waves,'x'+n.speed,n.crates,isDone(n)?'Cleared':canGo(n)?'Open':'Locked',PROG.done[n.id]??'-']))}`).join('')}`],
 ['combat','Combat',()=>`<h3>Drones</h3><p>A drone has 2 health. It flies straight at you and hurts you on contact (within 1.6 units) for 12 damage, at most once every 0.7 seconds. Armor reduces that damage.</p>
 <h3>Waves</h3><p>Wave N brings 3 + 2N drones. Drone speed starts at 2.4, rises 0.3 per wave, varies a little at random, and is then multiplied by the area's drone speed in the Worlds table.</p>
 <h3>Cover</h3><p>Crates and walls block movement and shots, for you and for drones.</p>
 <h3>Score</h3><p>Each drone is worth 10 points times the current wave. Your best score for each area is saved.</p>
 <h3>Defeat</h3><p>At zero health you are overrun. You can retry the area or open the map. You keep your items and scrap.</p>`],
 ['loot','Loot and currency',()=>`<h3>Drops</h3><p>${Math.round(DROP.chance*100)}% of downed drones drop something you collect by walking over it. Pickups stay on the ground for the rest of the area. When you clear an area, or are overrun, everything left on the ground is collected for you. Items that do not fit are automatically dismantled for their scrap value.</p>
-${tbl(['Drop','Chance','Details'],[['Scrap',Math.round(DROP.weights.scrap*100)+'%','2 to 6 scrap times the wave number'],['Consumable',Math.round(DROP.weights.items*100)+'%','Selected from item drop data'],['Gear',Math.round(gearPct()*100)+'%','Weighted by each gear item’s drop data']])}
-<p>Drop eligibility and weights are configured on each item. Weapon duplicates stack in your backpack. Select a weapon in the inventory to spend 10 copies and scrap to raise its level; upgrades increase damage, and the requirements and scaling are configurable per weapon.</p>
+${tbl(['Drop','Chance','Details'],[['Scrap',Math.round(DROP.scrap*100)+'%','2 to 6 scrap times the wave number'],['Medkit',Math.round(DROP.medkit*100)+'%','Goes to your backpack'],['Overcharge',Math.round(DROP.boost*100)+'%','Goes to your backpack'],['Gear',Math.round(gearPct()*100)+'%','One random weapon, armor piece, artifact or companion']])}
+<p>That makes any one specific piece of gear drop about once per ${Math.round(1/(DROP.chance*gearPct()/GEAR.length))} drones. The Upgrade bench at Home does not sell gear yet.</p>
 <h3>Scrap</h3><p>Scrap is a currency, not an item. It never uses a backpack slot and is capped at ${SCRAP_CAP.toLocaleString()}. You have ${WAL.scrap.toLocaleString()}.</p>
-<h3>Supply caches</h3><p>The first time you clear an area, a supply cache appears in it. Stand next to it and press ${keyName(B.use)} (or tap the prompt) to open it for scrap and either two medkits or a piece of gear. Each area has one cache, and it can only be opened once.</p><h3>Items and stacks</h3><p>Your backpack has ${INV.cap} slots. Consumables and weapon duplicates stack up to 999 per slot. Armor, artifacts, and companions do not stack. New gear goes straight into a matching empty slot, and new consumables fill an empty item slot. Dismantle items from the inventory for their listed scrap value. The two item slots reference a stack in your backpack and consume one item each time you use them.</p>
+<h3>Supply caches</h3><p>The first time you clear an area, a supply cache appears in it. Stand next to it and press ${keyName(B.use)} (or tap the prompt) to open it for scrap and either two medkits or a piece of gear. Each area has one cache, and it can only be opened once.</p><h3>Items and stacks</h3><p>Your backpack has ${INV.cap} slots. Items stack up to 999 per slot, so a pile of medkits uses one slot. Equipment does not stack. New gear goes straight into a matching empty slot, and new consumables fill an empty item slot. Dismantle items from the inventory for their listed scrap value. The two item slots reference a stack in your backpack and consume one item each time you use them.</p>
 <h3>Abilities</h3><p>Abilities are stored separately from items and cannot be discarded or dismantled. Select an ability to equip it in its matching ability slot.</p>
 ${tbl(['Item','Effect','Owned'],ofKind(t=>!t.slot).map(k=>[ITEMS[k].name,ITEMS[k].desc,count(k)]))}`],
-['weapons','Weapons',()=>`<h3>Using weapons</h3><p>You have three weapon slots. Switch with ${['w1','w2','w3'].map(k=>keyName(B[k])).join(', ')}. Equip weapons from the inventory. Your weapon is holstered at Home. Overcharge halves the delay between shots. A weapon in an empty slot cannot fire. Each level is shared by every copy of the same weapon.</p>
-${tbl(['Weapon','Level','Damage','Shots/s','With Overcharge','Damage/s','Hits to down a drone','Status'],ofKind(t=>t.slot==='weapon').map(k=>{const t=ITEMS[k],s=weaponStats(k);return[t.name,s.level+'/'+s.upgrade.maxLevel,s.dmg,r1(1/s.rate),r1(2/s.rate),r1(s.dmg/s.rate),Math.ceil(2/s.dmg),status(k)]}))}
-<p>The Pulse Blaster is your starting weapon. Other weapons come from drone drops. Upgrade any owned weapon in the inventory using 10 duplicate copies and scrap.</p>`],
+['weapons','Weapons',()=>`<h3>Using weapons</h3><p>You have three weapon slots. Switch with ${['w1','w2','w3'].map(k=>keyName(B[k])).join(', ')}. Equip weapons from the inventory. Your weapon is holstered at Home. Overcharge halves the delay between shots. A weapon in an empty slot cannot fire.</p>
+${tbl(['Weapon','Damage','Shots/s','With Overcharge','Damage/s','Hits to down a drone','Status'],ofKind(t=>t.slot==='weapon').map(k=>{const t=ITEMS[k];return[t.name,t.dmg,r1(1/t.rate),r1(2/t.rate),r1(t.dmg/t.rate),Math.ceil(2/t.dmg),status(k)]}))}
+<p>The Pulse Blaster is your starting weapon. Other weapons come from drone drops.</p>`],
 ['armor','Armor and artifacts',()=>`<h3>Slots</h3><p>Armor goes in head, chest, arms, waist, legs and feet slots. The artifact slot holds one relic. Armor and artifacts only count while equipped.</p>
 ${tbl(['Slot','Item','Armor','Other bonus','Status'],ofKind(t=>ARMOR_SLOTS.includes(t.slot)).map(k=>{const t=ITEMS[k];return[SLOTLBL[t.slot],t.name,t.armor||0,[t.hp&&'+'+t.hp+' max health',t.speed&&'+'+Math.round(t.speed*100)+'% speed'].filter(Boolean).join(', ')||'-',status(k)]}))}
 <h3>How armor works</h3><p>Damage reduction = armor / (armor + 40). 10 armor cuts damage by 20%, 20 by 33%, and 40 by 50%. Each point is worth a little less than the last, so you can never become immune. The best armor currently available totals ${ARMOR_SLOTS.reduce((t,sl)=>t+Math.max(0,...ofKind(i=>i.slot===sl).map(k=>ITEMS[k].armor||0)),0)}.</p>
@@ -1099,7 +999,7 @@ ${tbl(['Slot','Item','Armor','Other bonus','Status'],ofKind(t=>ARMOR_SLOTS.inclu
 ${tbl(['Companion','Output','Every','Range','Rate','Status'],ofKind(t=>t.slot==='companion').map(k=>{const t=ITEMS[k];if(t.heal){return [t.name,Math.round(t.heal*100)+'% max HP',t.interval+'s',t.range+'m','5%/s after '+t.wait+'s safe',status(k)]}return [t.name,t.cdmg+' dmg',t.iv+'s',t.range,r1(t.cdmg/t.iv),status(k)]}))}
 <p>Companions are not affected by Overcharge. They drop from drones like other gear.</p>`],
 ['stats','Stats explained',()=>`${tbl(['Stat','Meaning'],[['Health','100 plus any max health bonuses. Medkits restore 35. Health refills when you arrive Home.'],['Armor','Total armor from equipped pieces, converted to damage reduction as described under Armor.'],['Move speed','6 walking and 9 sprinting, multiplied by any speed bonuses.'],['Weapon damage','Health removed from a drone per hit. Drones have 2 health.'],['Fire rate','Shots per second of your active weapon, doubled by Overcharge.'],['Overcharge','Lasts 8 seconds after use.'],['Companion','Damage and delay of your companion, if any.'],['Drones downed','Lifetime total across all runs.'],['Areas cleared','Areas you have cleared out of all areas in every world.'],['Scrap','Currency, capped at '+SCRAP_CAP.toLocaleString()+'.'],['Slots','Backpack slots in use. Each stack holds up to 999.']])}
-<h3>Saving</h3><p>Progress, options, bindings, inventory and equipment save automatically in this browser. Reset all save data in Options clears everything.</p>`],
+<h3>Saving</h3><p>Progress, options, bindings, inventory and equipment save automatically in this browser. Use Options, then Save data, to export your save as text or a file and import it on another device or browser. Reset all save data in Options clears everything.</p>`],
 ['home','Home',()=>`<p>Home is a neutral zone and where every session starts. No drones appear, your weapon is holstered, and you heal fully on arrival. Returning home brings you back to safety.</p>
 <h3>Stations</h3><p>Stand next to a station and press ${keyName(B.use)} (or tap the prompt that appears) to use it.</p>${tbl(['Station','Use'],[['Map (cyan)','Opens the world map so you can travel to an area.'],['Upgrade bench (gold)','Spend scrap on upgrades. Nothing is for sale yet.'],['Compendium (violet)','Opens this in-game guide.'],...(OPT.dev?[['Dev pedestal (magenta)','Opens the developer menu.']]:[])])}`]
 ];
@@ -1110,6 +1010,75 @@ function renderComp(){
 compEl.onclick=e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.x)return closeComp();if(b.dataset.t){compTab=b.dataset.t;renderComp();compEl.scrollTop=0}};
 function compendium(back){if(state==='play'){state='paused';release()}compBack=back;compEl.classList.add('on');renderComp()}
 function closeComp(){compEl.classList.remove('on');const b=compBack;compBack=null;if(b)b()}
+// Save export / import: one JSON envelope with an integrity check, shared by the text box and file paths
+function sanitizeProgress(){
+  const known=k=>NODES.some(n=>n.id===k);
+  Object.keys(PROG.done).forEach(k=>{if(!known(k)||!Number.isFinite(+PROG.done[k]))delete PROG.done[k];else PROG.done[k]=Math.max(0,Math.floor(+PROG.done[k]))});
+  Object.keys(PROG.looted).forEach(k=>{if(!known(k))delete PROG.looted[k]});
+  if(!known(PROG.at))PROG.at=NODES[0].id;
+}
+sanitizeProgress();
+const fnv=t=>{let h=0x811c9dc5;for(let i=0;i<t.length;i++){h^=t.charCodeAt(i);h=Math.imul(h,0x01000193)>>>0}return h.toString(16).padStart(8,'0')};
+function exportText(){
+  const data=JSON.stringify(Store.data);
+  return JSON.stringify({game:'salt-flats-drone-defense',format:1,exported:new Date().toISOString(),check:fnv(data),data:JSON.parse(data)},null,1);
+}
+function parseSave(text){
+  let env;try{env=JSON.parse(String(text).trim())}catch(e){return{error:'That is not valid save text. Copy the whole save, from the first { to the last }.'}}
+  const plain=x=>x&&typeof x==='object'&&!Array.isArray(x);
+  if(!plain(env)||env.game!=='salt-flats-drone-defense'||!plain(env.data))return{error:'This is not a Salt Flats Drone Defense save.'};
+  if((+env.data.v||1)>Store.VER)return{error:'This save is from a newer version of the game.'};
+  if(fnv(JSON.stringify(env.data))!==env.check&&!OPT.dev)return{error:'The save failed its integrity check. It may be incomplete or edited.'};
+  try{return{data:Store.normalize(env.data)}}catch(e){return{error:'The save data is damaged.'}}
+}
+function applySave(n){
+  pickups.splice(0).forEach(k=>scene.remove(k.m));
+  Store.replace(n);sanitizeSave();sanitizeProgress();Store.save();
+  LV=nodeById(PROG.at);wSel=0;god=false;applyOpts();enterHome();
+  screen('Save imported','Your progress has been loaded and you are back at Home.',resume);btn('Continue',resume,'main');
+}
+const say=t=>{$('m').textContent=t};
+function textBox(value,readOnly){
+  menu.className='wide';const ta=document.createElement('textarea');ta.value=value;ta.readOnly=!!readOnly;
+  ta.setAttribute('aria-label',readOnly?'Save text':'Paste save text here');if(!readOnly)ta.placeholder='Paste save text here';
+  menu.appendChild(ta);return ta;
+}
+function saveMenu(back){
+  screen('Save data','Back up your progress, or move it to another device or browser.',()=>options(back));
+  btn('Export save',()=>exportScreen(back),'main');btn('Import save',()=>importScreen(back));btn('Back',()=>options(back));
+}
+function exportScreen(back){
+  screen('Export save','Copy this text or save it as a file. It contains your whole save, so keep it safe.',()=>saveMenu(back));
+  const ta=textBox(exportText(),true);
+  btn('Copy to clipboard',async()=>{
+    try{await navigator.clipboard.writeText(ta.value);say('Copied to the clipboard.')}
+    catch(e){ta.focus();ta.select();let ok=false;try{ok=document.execCommand('copy')}catch(_){}say(ok?'Copied to the clipboard.':'Copy the selected text manually (Ctrl+C, or long-press).')}
+  },'main');
+  const file=btn('Save as file',async()=>{
+    try{const d=await window.claude.use('downloads');await d.save({filename:'salt-flats-save-'+new Date().toISOString().slice(0,10)+'.json',data:ta.value});say('Save file ready.')}
+    catch(e){say(e&&e.code==='declined'?'Save cancelled.':'Saving a file is not available here. Use Copy instead.')}
+  });
+  file.hidden=true;
+  try{Promise.resolve(window.claude&&window.claude.use?window.claude.use('downloads'):null).then(d=>{if(d)file.hidden=false}).catch(()=>{})}catch(e){}
+  btn('Back',()=>saveMenu(back));
+}
+function importScreen(back,note){
+  screen('Import save',note||'Paste your save text, or choose a saved file. Export your current save first if you want to keep it.',()=>saveMenu(back));
+  const ta=textBox('',false);
+  btn('Import pasted text',()=>confirmImport(ta.value,back),'main');
+  btn('Choose file...',()=>{
+    const i=document.createElement('input');i.type='file';i.accept='.json,.txt,application/json,text/plain';
+    i.onchange=()=>{const f=i.files&&i.files[0];if(!f)return;const r=new FileReader();r.onload=()=>confirmImport(String(r.result),back);r.onerror=()=>say('Could not read that file.');r.readAsText(f)};
+    i.click();
+  });
+  btn('Back',()=>saveMenu(back));
+}
+function confirmImport(text,back){
+  const r=parseSave(text);if(r.error)return importScreen(back,r.error);
+  const n=r.data,num=v=>Math.max(0,Math.floor(+v||0));
+  screen('Replace your save?','This save has '+Object.keys(n.progress.done||{}).length+' cleared areas, '+num(n.wallet.scrap).toLocaleString()+' scrap and '+num(n.stats.kills).toLocaleString()+' drones downed. It will replace your current progress and cannot be undone.',()=>importScreen(back));
+  btn('Import and replace',()=>applySave(n),'main');btn('Cancel',()=>importScreen(back));
+}
 function exitGame(){state='menu';release();screen('Game closed','Thanks for playing. Your progress is saved.');btn('Reopen',goHome,'main');try{window.close()}catch(e){}}
 // Home: a neutral, weapon-free hub. Pads open the map and the upgrade bench.
 const homeGroup=new THREE.Group();homeGroup.visible=false;scene.add(homeGroup);
@@ -1142,7 +1111,7 @@ function enterHome(){
   $('lv').textContent='Home';$('wv').textContent='Safe';$('dr').textContent=0;syncHud();save();
 }
 function upgrades(back){
-  screen('Upgrade bench','Scrap: '+WAL.scrap+'.'+(UPGRADES.length?'':' Nothing to buy yet. Upgrades are coming.'));
+  screen('Upgrade bench','Scrap: '+WAL.scrap+'.'+(UPGRADES.length?'':' Nothing to buy yet. Upgrades are coming.'),back);
   UPGRADES.forEach(u=>{const own=Store.data.upgrades[u.id];
     btn(u.name+': '+u.desc+(own?' (owned)':' ['+u.cost+' scrap]'),()=>{if(WAL.scrap>=u.cost){WAL.scrap-=u.cost;hudScrap();Store.data.upgrades[u.id]=1;save();upgrades(back)}},'',own||WAL.scrap<u.cost)});
   btn('Close',back,'main');
@@ -1159,7 +1128,7 @@ function spawnCache(){
   cache={m,x,z,label:'Open supply cache',act:openCache};
 }
 function openCache(){
-  const rolls=[{id:'scrap',n:Math.ceil((15+Math.random()*25)*LV.waves)},Math.random()<.35&&GEAR.length?{id:pickGear(),n:1}:{id:'medkit',n:2}];
+  const rolls=[{id:'scrap',n:Math.ceil((15+Math.random()*25)*LV.waves)},Math.random()<.35?{id:GEAR[Math.floor(Math.random()*GEAR.length)],n:1}:{id:'medkit',n:2}];
   rolls.forEach(k=>collect(k,true));
   PROG.looted[LV.id]=true;removeCache();save();syncHud();beep(880,.3,'sine',.1);
   const extra=rolls.reduce((t,k)=>t+(k.salvaged||0),0);
@@ -1189,7 +1158,7 @@ function syncDev(){
   if(OPT.dev&&inHome){if(i<0)boxes.push(DEV_BOX)}else if(i>=0)boxes.splice(i,1);
 }
 function devMenu(back,note){
-  screen('Developer menu',note||'Testing tools. Scrap, items and progress changes are saved.');
+  screen('Developer menu',note||'Testing tools. Scrap, items and progress changes are saved.',back);
   btn('God mode: '+(god?'On':'Off'),()=>{god=!god;devMenu(back,'God mode '+(god?'on':'off')+'.')});
   btn('Heal to full',()=>{setHp(maxHp());devMenu(back,'Healed to full.')});
   btn('Add 10,000 scrap',()=>{addScrap(10000);save();devMenu(back,'Scrap: '+WAL.scrap.toLocaleString())});
@@ -1202,14 +1171,14 @@ function devMenu(back,note){
   btn('Close',back,'main');
 }
 function devItems(back){
-  screen('Give item','Stackables give 10, equipment gives 1.');
+  screen('Give item','Stackables give 10, equipment gives 1.',()=>devMenu(back));
   Object.keys(ITEMS).forEach(id=>btn(ITEMS[id].name+' ['+(ITEMS[id].slot==='item'?'item':ITEMS[id].slot)+']',()=>{
     const k={id,n:ITEMS[id].slot==='item'?10:1};collect(k,true);save();refreshQuick();devItems(back);$('m').textContent='Gave '+ITEMS[id].name+(k.equipped?' (equipped).':k.salvaged?' (backpack full, salvaged).':'.');
   }));
   btn('Back',()=>devMenu(back),'main');
 }
 function devTravel(back){
-  screen('Travel to any area','Ignores locks. Undefeated areas start a fight.');
+  screen('Travel to any area','Ignores locks. Undefeated areas start a fight.',()=>devMenu(back));
   NODES.forEach(n=>btn(n.w.name+': '+n.name,()=>enterArea(n,null,false)));
   btn('Back',()=>devMenu(back),'main');
 }
@@ -1250,10 +1219,12 @@ function enterArea(n,from,force){
   if(areaClear)$('wv').textContent='Clear';else spawnWave();
   resume();
 }
-function resume(){state='play';ov.style.display='none';$('pb').classList.add('on');$('quick').classList.add('on');refreshQuick();if(!isTouch)renderer.domElement.requestPointerLock()}
+function resume(){state='play';ov.style.display='none';$('pb').classList.add('on');$('quick').classList.add('on');refreshQuick();if(!isTouch){try{const pl=renderer.domElement.requestPointerLock();if(pl&&pl.catch)pl.catch(()=>{})}catch(e){}
+  setTimeout(()=>{if(state==='play'&&document.pointerLockElement!==renderer.domElement)toast('Click to look around')},150)}}
 function pause(){
+  if(state==='play')pausedAt=performance.now();
   state='paused';release();
-  screen(inHome?'Salt Flats Drone Defense':'Paused',inHome?'Home. You are safe here.':LV.name+', '+LV.w.name+'. Score '+score+'.');
+  screen(inHome?'Salt Flats Drone Defense':'Paused',inHome?'Home. You are safe here.':LV.name+', '+LV.w.name+'. Score '+score+'.',resume);
   btn('Resume',resume,'main');btn('Map',()=>worldMap(null,null,pause));btn('Inventory',()=>inventory(pause));
   btn('Compendium',()=>compendium(pause));btn('Options',()=>options(pause));
   if(OPT.dev)btn('Dev menu',()=>devMenu(pause));
@@ -1265,7 +1236,7 @@ function complete(){
   PROG.done[LV.id]=Math.max(PROG.done[LV.id]||0,score);save();$('wv').textContent='Clear';spawnGates();spawnCache();beep(880,.3,'sine',.1);
   const nw=LV.final&&WORLDS[WORLDS.indexOf(LV.w)+1];
   const r=autoCollect(),finish=()=>{
-    if(nw&&first){state='won';release();screen(LV.w.name+' cleared','Score '+score+'. '+nw.name+' is now on the map.');
+    if(nw&&first){state='won';release();screen(LV.w.name+' cleared','Score '+score+'. '+nw.name+' is now on the map.',resume);
       btn('Open map',()=>worldMap(nw,null,resume),'main');btn('Keep exploring',resume);return}
     if(state!=='play')resume();
     const rewards=[];
