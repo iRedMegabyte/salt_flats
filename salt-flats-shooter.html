@@ -103,12 +103,15 @@ canvas{display:block;position:fixed;inset:0;width:100%;height:100%}
 #warn button{font:inherit;font-weight:700;font-size:16px;padding:10px 16px;border-radius:10px;border:2px solid var(--hot);background:transparent;color:var(--ink);cursor:pointer}
 #warn button:first-child{background:var(--hot);color:#1b1d3d}
 #warn button:focus-visible{outline:3px solid var(--cool);outline-offset:2px}
+#usePrompt{display:none;position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 30%);transform:translateX(-50%);pointer-events:auto;font:inherit;font-weight:700;font-size:16px;padding:10px 18px;border-radius:10px;border:2px solid var(--hot);background:#1b1d3dee;color:var(--ink);cursor:pointer}
+#usePrompt.on{display:block}
+#usePrompt:focus-visible{outline:3px solid var(--cool);outline-offset:3px}
 </style>
 </head>
 <body>
 <div id="hud">
   <div id="hp" role="meter" aria-label="Health" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"><div id="hpf"></div></div>
-  <div id="quick"><button id="qm"></button><button id="qb"></button><button id="qi"></button></div><div id="toast"></div><div id="cross"></div><div id="vig"></div>
+  <div id="quick"><button id="qm"></button><button id="qb"></button><button id="qi"></button></div><div id="toast"></div><button id="usePrompt" type="button"></button><div id="cross"></div><div id="vig"></div>
 </div>
 <div id="hudData" aria-hidden="true"><span id="sc">0</span><span id="scr">0</span><span id="lv"></span><span id="wv">1</span><span id="dr">0</span></div>
 <div id="touch"><div id="stick"><div id="knob"></div></div><div id="fire">FIRE</div><button id="jump" type="button" aria-label="Jump">JUMP</button><button id="aim" type="button" aria-label="Aim down sights" aria-pressed="false">AIM</button></div>
@@ -129,9 +132,9 @@ const Store=(()=>{
   const KEY='sfdd.save',VER=5,mem={};
   const adapter={get(k){try{return localStorage.getItem(k)}catch(e){return mem[k]??null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){mem[k]=v}}};
   const defaults=()=>({v:VER,
-    options:{sens:1,vol:.7,fov:75,invert:false},
+    options:{sens:1,vol:.7,fov:75,invert:false,dev:false},
     keys:{forward:'KeyW',back:'KeyS',left:'KeyA',right:'KeyD',sprint:'ShiftLeft',jump:'Space',pause:'KeyP',inventory:'KeyI',map:'KeyM',use:'KeyE',item1:'KeyQ',item2:'KeyR',w1:'Digit1',w2:'Digit2',w3:'Digit3',compendium:'KeyC'},
-    progress:{at:'landing',done:{}},
+    progress:{at:'landing',done:{},looted:{}},
     inventory:{cap:24,slots:[{id:'medkit',n:1}]},
     abilities:{items:['basicJump','doubleJump','glide']},
     equipment:{weapons:['blaster',null,null],itemSlots:[null,null],jumpType:'basicJump',armor:{head:null,chest:null,arms:null,waist:null,legs:null,feet:null,artifact:null},companion:null},
@@ -140,42 +143,23 @@ const Store=(()=>{
   const isObj=x=>x&&typeof x==='object'&&!Array.isArray(x);
   function merge(d,src){for(const k in d){if(src&&src[k]!==undefined){if(isObj(d[k])&&Object.keys(d[k]).length)merge(d[k],src[k]);else d[k]=src[k]}}return d}
   function load(){
-    let d=defaults();
+    let d=defaults(),dirty=false;
     try{
       const raw=adapter.get(KEY);
       if(raw){
-        const saved=JSON.parse(raw),oldVersion=saved.v||1;
+        const saved=JSON.parse(raw),from=saved.v||1;
         d=merge(d,saved);
-        if(oldVersion<3){
-          for(const id of d.equipment.itemSlots){
-            if(!id)continue;
-            const stack=d.inventory.slots.find(s=>s.id===id);
-            if(stack)stack.n=Math.min(999,stack.n+1);
-            else d.inventory.slots.push({id,n:1});
-          }
-          d.migratedItemSlots=true;
-        }
-        if(oldVersion<4){
-          d.abilities.items=d.abilities.items||[];
-          if(d.equipment.jumpType&&!d.abilities.items.includes(d.equipment.jumpType))d.abilities.items.push(d.equipment.jumpType);
-          if(!d.abilities.items.includes('basicJump'))d.abilities.items.push('basicJump');
-          if(d.inventory.slots.some(s=>s.id==='basicJump')){
-            d.inventory.slots=d.inventory.slots.filter(s=>s.id!=='basicJump');
-            d.migratedAbilities=true;
-          }
-          d.migratedAbilities=true;
-        }
-        if(oldVersion<5){
-          d.abilities.items=d.abilities.items||[];
-          for(const id of ['basicJump','doubleJump','glide'])if(!d.abilities.items.includes(id))d.abilities.items.push(id);
-          d.migratedAbilities=true;
-        }
+        // v3: equipped item slots now reference backpack stacks, so return the equipped item to the backpack
+        if(from<3)for(const id of d.equipment.itemSlots){if(!id)continue;const st=d.inventory.slots.find(x=>x.id===id);if(st)st.n=Math.min(999,st.n+1);else d.inventory.slots.push({id,n:1})}
+        // v4/v5: movement abilities are a permanent unlock list, not backpack items
+        if(from<5)d.abilities.items=[...new Set([...(d.abilities.items||[]),'basicJump','doubleJump','glide'])];
+        dirty=from<VER;
       }
       else{const old=JSON.parse(adapter.get('sfdd')||'null');if(old){merge(d.options,old.OPT)}}
     }catch(e){}
     d.inventory.slots=d.inventory.slots.filter(s=>{if(s.id==='scrap'){d.wallet.scrap=Math.min(100000000,d.wallet.scrap+s.n);return false}return true});
     d.inventory.cap=Math.max(d.inventory.cap,24);d.v=VER;
-    if(d.migratedItemSlots||d.migratedAbilities){delete d.migratedItemSlots;delete d.migratedAbilities;adapter.set(KEY,JSON.stringify(d))}
+    if(dirty)adapter.set(KEY,JSON.stringify(d));
     return d;
   }
   const data=load();
@@ -396,6 +380,12 @@ let ac;function beep(f,d,type,vol){vol*=OPT.vol;if(vol<.002)return;
   g.gain.exponentialRampToValueAtTime(.001,ac.currentTime+d);o.connect(g);g.connect(ac.destination);o.start();o.stop(ac.currentTime+d)}catch(e){}
 }
 
+function hurtPlayer(amount){
+  if(god)return;
+  P.hp-=amount*(1-armorRed());lastDamageAt=gameTime;hudHp();
+  $('vig').style.opacity=.9;setTimeout(()=>$('vig').style.opacity=0,200);beep(110,.2,'sawtooth',.1);
+  if(P.hp<=0&&state==='play')over();
+}
 function hurt(o,d,impulse){
   if(o.userData.hp===undefined)return;
   if(impulse&&o.userData.knockback)o.userData.knockback.add(impulse);
@@ -472,7 +462,7 @@ function sCenter(){const r=stickEl.getBoundingClientRect();return[r.left+r.width
 document.addEventListener('touchstart',e=>{
   if(state!=='play')return;
   for(const t of e.changedTouches){
-    if(e.target.id==='pb'||e.target.closest('#quick'))continue;
+    if(e.target.id==='pb'||e.target.closest('#quick')||e.target.id==='usePrompt')continue;
     if(jumpEl.contains(e.target)){jumpPressed=true;jumpEl.classList.add('on');jumpEl._id=t.identifier;continue}
     if(aimEl.contains(e.target)){aiming=true;aimEl._id=t.identifier;continue}
     if(fireEl.contains(e.target)){firing=true;fireEl._id=t.identifier;continue}
@@ -589,10 +579,21 @@ function syncGunModel(){
   while(gun.children.length)gun.remove(gun.children[0]);
   if(id)gun.add(makeGunModel(id));
 }
-const GEAR=Object.keys(ITEMS).filter(k=>ITEMS[k].slot&&k!=='blaster');
+const GEAR=Object.keys(ITEMS).filter(k=>ITEMS[k].slot&&ITEMS[k].slot!=='item'&&k!=='blaster');
 const DROP={chance:.45,scrap:.55,medkit:.22,boost:.15}; // gear gets whatever is left
 const PCOL={medkit:0x46e0d0,boost:0xff3d6e,scrap:0xcfcfcf};
 const maxOf=id=>(ITEMS[id].max ?? ((ITEMS[id].slot && ITEMS[id].slot!=='item')?1:999));
+// Repair saves that reference items or abilities that no longer exist, or hold impossible values
+(function sanitizeSave(){
+  INV.slots=INV.slots.filter(x=>ITEMS[x.id]&&x.n>0).map(x=>({id:x.id,n:Math.min(Math.floor(x.n),maxOf(x.id))})).slice(0,INV.cap);
+  EQ.weapons=[0,1,2].map(i=>ITEMS[EQ.weapons[i]]?.slot==='weapon'?EQ.weapons[i]:null);
+  EQ.itemSlots=[0,1].map(i=>ITEMS[EQ.itemSlots[i]]?.slot==='item'?EQ.itemSlots[i]:null);
+  ARMOR_SLOTS.forEach(k=>{if(ITEMS[EQ.armor[k]]?.slot!==k)EQ.armor[k]=null});
+  if(ITEMS[EQ.companion]?.slot!=='companion')EQ.companion=null;
+  ABIL.items=ABIL.items.filter(id=>ABILITIES[id]);
+  if(!ABIL.items.includes(EQ.jumpType))EQ.jumpType=ABIL.items.includes('basicJump')?'basicJump':null;
+  WAL.scrap=Math.max(0,Math.min(SCRAP_CAP,Math.floor(+WAL.scrap||0)));
+})();
 const bonus=k=>ARMOR_SLOTS.reduce((t,s)=>t+((ITEMS[EQ.armor[s]]||{})[k]||0),0);
 const maxHp=()=>100+bonus('hp'),armorRed=()=>{const a=bonus('armor');return a/(a+40)};
 const wk=c=>Object.keys(B).find(k=>B[k]===c)||'';
@@ -611,11 +612,27 @@ function useItem(id){
   const it=ITEMS[id];if(!it.use||!count(id)||!it.use())return false;
   removeItem(id);beep(660,.2,'sine',.08);save();refreshQuick();return true;
 }
+// New gear goes straight into a matching empty slot (never when returning items from the inventory screen)
+function autoEquip(id){
+  const it=ITEMS[id];
+  if(it.slot==='weapon'){const i=EQ.weapons.indexOf(null);if(i<0)return false;EQ.weapons[i]=id;return true}
+  if(it.slot==='companion'){if(EQ.companion)return false;EQ.companion=id;refreshCompanion();return true}
+  if(ARMOR_SLOTS.includes(it.slot)){if(EQ.armor[it.slot])return false;EQ.armor[it.slot]=id;return true}
+  return false;
+}
+// Consumables stay in the backpack; an empty item slot is pointed at the stack
+function autoSlotItem(id){
+  if(ITEMS[id].slot!=='item'||EQ.itemSlots.includes(id)||!count(id))return false;
+  const i=EQ.itemSlots.indexOf(null);if(i<0)return false;EQ.itemSlots[i]=id;return true;
+}
 function collect(k,q){
   if(k.id==='scrap'){addScrap(k.n);if(!q)toast('+'+k.n+' scrap');return true}
-  const overflow=addItem(k.id,k.n||1);
-  if(!overflow){if(!q)toast('+ '+ITEMS[k.id].name);return true}
-  if(q){addScrap(overflow*(ITEMS[k.id].scrap??DEFAULT_SCRAP_VALUE));return true}
+  let n=k.n||1;
+  if(autoEquip(k.id)){k.equipped=true;n--;syncHud()}
+  const overflow=n>0?addItem(k.id,n):0;
+  if(autoSlotItem(k.id))refreshQuick();
+  if(!overflow){if(!q)toast((k.equipped?'Equipped: ':'+ ')+ITEMS[k.id].name);return true}
+  if(q){k.salvaged=overflow;addScrap(overflow*(ITEMS[k.id].scrap??DEFAULT_SCRAP_VALUE));return true}
   return false;
 }
 function dropLoot(pos){
@@ -625,31 +642,27 @@ function dropLoot(pos){
   const m=new THREE.Mesh(new THREE.BoxGeometry(.35,.35,.35),new THREE.MeshLambertMaterial({color:c,emissive:c,emissiveIntensity:.4}));
   m.position.set(pos.x,.6,pos.z);scene.add(m);pickups.push({m,id,n,t:30});
 }
-// End-of-area pickup: collect everything left on the ground; warn before anything would be lost
+// End-of-area pickup: collect everything left on the ground; anything that does not fit is salvaged for scrap
 const warnEl=$('warn');
 function autoCollect(){
-  let got=0,salvaged=0;const left=[];
+  let got=0,items=0,scrap=0;const equipped=[];
   for(const k of pickups.splice(0)){
-    const scrapBefore=WAL.scrap;
-    if(collect(k,true)){scene.remove(k.m);got++;if(k.id!=='scrap')salvaged+=WAL.scrap-scrapBefore}
-    else left.push(k);
+    const before=WAL.scrap;collect(k,true);scene.remove(k.m);got++;if(k.equipped)equipped.push(ITEMS[k.id].name);
+    if(k.salvaged){items+=k.salvaged;scrap+=WAL.scrap-before}
   }
-  pickups.push(...left);save();refreshQuick();return{got,left,salvaged};
+  save();refreshQuick();return{got,salvaged:scrap,items,equipped};
 }
 function leavePickups(){
   const r=autoCollect();
-  if(r.left.length){const n=r.left.length;r.left.forEach(k=>scene.remove(k.m));pickups.length=0;toast('Backpack full: '+n+' item'+(n>1?'s':'')+' lost',3500)}
+  if(r.items)toast('Backpack full: '+r.items+' item'+(r.items>1?'s':'')+' salvaged for '+r.salvaged+' scrap',3500);
 }
-function warnFull(done){
+function notifyFull(r,done){
   state='paused';release();
-  const g={};pickups.forEach(k=>{const n=ITEMS[k.id].name;g[n]=(g[n]||0)+1});
-  const list=Object.keys(g).map(n=>g[n]>1?n+' x'+g[n]:n).join(', '),n=pickups.length;
-  warnEl.innerHTML=`<div class="card"><h2>Backpack full</h2><p>${n} item${n>1?'s':''} will be lost when you leave this area: ${list}.</p><p>Clean up your inventory by equipping, using, or discarding items to make room.</p><div class="acts"><button data-w="inv">Open inventory</button><button data-w="skip">Leave them behind</button></div></div>`;
+  warnEl.innerHTML=`<div class="card"><h2>Backpack full</h2><p>${r.items} item${r.items>1?'s':''} did not fit and ${r.items>1?'were':'was'} salvaged for ${r.salvaged} scrap.</p><p>Equip, use, or discard items to make room so you keep gear next time.</p><div class="acts"><button data-w="inv">Open inventory</button><button data-w="skip">Continue</button></div></div>`;
   warnEl.classList.add('on');warnEl.querySelector('button').focus();
   warnEl.onclick=e=>{
     const b=e.target.closest('[data-w]');if(!b)return;warnEl.classList.remove('on');
-    if(b.dataset.w==='inv')inventory(()=>{const r=autoCollect();if(r.left.length)warnFull(done);else{toast('Everything collected');done()}});
-    else done();
+    if(b.dataset.w==='inv')inventory(done);else done();
   };
 }
 // Companion
@@ -715,7 +728,7 @@ function onKey(e){
   if(e.code==='Escape'||e.code===B.pause)pause();
   else if(e.code===B.inventory)inventory(resume);
   else if(e.code===B.compendium)compendium(resume);
-  else if(e.code===B.use){toast('Use: interact with nearby world objects');}
+  else if(e.code===B.use)doUse();
   else if(/^w[123]$/.test(wk(e.code))){wSel=+wk(e.code)[1]-1;toast('Weapon '+(wSel+1)+': '+(ITEMS[EQ.weapons[wSel]]?ITEMS[EQ.weapons[wSel]].name:'empty'))}
   else if(e.code===B.map){state='paused';release();worldMap(null,null,resume)}
   else if(e.code===B.item1)useBoundItem('item1');
@@ -760,7 +773,7 @@ function renderInv(){
   h+=`<section><h3>Stats</h3><div class="st"><span>Weapon damage</span><b>${w?w.dmg:'none'}</b></div>
    <div class="st"><span>Fire rate</span><b>${w?(1/(w.rate*(boostT>0?.5:1))).toFixed(1)+'/s':'none'}</b></div>
    <div class="st"><span>Move speed</span><b>${(6*(1+bonus('speed'))).toFixed(1)}</b></div>
-   <div class="st"><span>Companion</span><b>${c?c.cdmg+' dmg / '+c.iv+'s':'none'}</b></div>
+   <div class="st"><span>Companion</span><b>${c?(c.heal?'Heals '+Math.round(c.heal*100)+'% / '+c.interval+'s':c.cdmg+' dmg / '+c.iv+'s'):'none'}</b></div>
    <div class="st"><span>Drones downed</span><b>${S.kills.toLocaleString()}</b></div>
    <div class="st"><span>Areas cleared</span><b>${Object.keys(PROG.done).length} / ${NODES.length}</b></div></section>`;
   h+=`<section><h3>Weapons</h3><div class="grid">${EQ.weapons.map((x,i)=>cell('eq','w'+i,'Weapon '+(i+1)+(i===wSel?' (active)':''),x,'',sel('eq','w'+i))).join('')}</div>
@@ -858,7 +871,7 @@ let LV=nodeById(PROG.at),areaClear=false,inHome=false,padHot=null;const gates=[]
 const ov=$('ov'),menu=$('menu');
 const mapBackZones=[$('map-back-left'),$('map-back-right')];
 function setMapBackZones(visible){mapBackZones.forEach(zone=>{zone.hidden=!visible})}
-function leaveMap(){if(!mapOpen)return;const back=mapBack||mainMenu;mapOpen=false;mapBack=null;setMapBackZones(false);back()}
+function leaveMap(){if(!mapOpen)return;const back=mapBack||pause;mapOpen=false;mapBack=null;setMapBackZones(false);back()}
 mapBackZones.forEach(zone=>zone.addEventListener('click',e=>{e.stopPropagation();leaveMap()}));
 function save(){Store.save()}
 function applyOpts(){camera.fov=OPT.fov;camera.updateProjectionMatrix()}applyOpts();
@@ -872,13 +885,10 @@ function slider(label,key,min,max,step,fmt){
   i.oninput=()=>{OPT[key]=+i.value;v.textContent=label+': '+fmt(OPT[key]);applyOpts();save();if(key==='vol')beep(520,.1,'square',.06)};
   l.append(v,i);menu.appendChild(l);
 }
-function mainMenu(){
-  state='menu';release();if(!inHome)enterHome();screen('Salt Flats Drone Defense','You are home and safe. Chart a route across the map when you are ready.');
-  btn('Enter home',resume,'main');btn('Open map',()=>worldMap(null,null,mainMenu));btn('Inventory',()=>inventory(mainMenu));btn('Options',()=>options(mainMenu));btn('Compendium',()=>compendium(mainMenu));btn('Exit game',exitGame);
-}
+function goHome(){enterHome();resume()}
 function worldOverview(back){
   screen('Sol Navigation Map','');
-  const returnTo=back||mainMenu,previous=()=>worldOverview(returnTo);mapBack=returnTo;
+  const returnTo=back||pause,previous=()=>worldOverview(returnTo);mapBack=returnTo;
   const columns=2,rowH=108,height=Math.ceil(WORLDS.length/columns)*rowH;
   let h=`<svg viewBox="0 0 320 ${height}" role="group" aria-label="All worlds and destinations">`;
   WORLDS.forEach((w,index)=>{
@@ -910,7 +920,7 @@ function worldOverview(back){
 }
 function worldMap(w,sel,back){
   if(!w)return worldOverview(back);
-  mapBack=back||mainMenu;
+  mapBack=back||pause;
   sel=sel||(w===LV.w?LV:null);const wi=WORLDS.indexOf(w);
   const details=sel?sel.name+': '+sel.desc+' '+sel.waves+' waves'+(isDone(sel)?'. Cleared, best '+PROG.done[sel.id]+'.':canGo(sel)?'. Open destination.':'. Locked destination.'):'Pick a destination on the map.';
   screen(w.name,details);
@@ -930,8 +940,9 @@ function options(back){
   slider('Volume','vol',0,1,.05,v=>Math.round(v*100)+'%');
   slider('Field of view','fov',60,100,1,v=>v+'\u00b0');
   const c=btn('Invert vertical look: '+(OPT.invert?'On':'Off'),()=>{OPT.invert=!OPT.invert;save();options(back)});
+  btn('Developer options: '+(OPT.dev?'On':'Off'),()=>{OPT.dev=!OPT.dev;syncDev();save();options(back)});
   btn('Controls',()=>controls(back));
-  btn('Reset all save data',()=>{Store.reset();applyOpts();syncHud();options(back)});
+  btn('Reset all save data',()=>{Store.reset();applyOpts();syncHud();syncDev();options(back)});
   btn('Back',back);
 }
 // Compendium: in-game documentation generated from live game data
@@ -955,11 +966,11 @@ ${WORLDS.map(w=>`<h3>${w.name}${worldOpen(w)?'':' (locked)'}</h3>${tbl(['Area','
 <h3>Cover</h3><p>Crates and walls block movement and shots, for you and for drones.</p>
 <h3>Score</h3><p>Each drone is worth 10 points times the current wave. Your best score for each area is saved.</p>
 <h3>Defeat</h3><p>At zero health you are overrun. You can retry the area or open the map. You keep your items and scrap.</p>`],
-['loot','Loot and currency',()=>`<h3>Drops</h3><p>${Math.round(DROP.chance*100)}% of downed drones drop something you collect by walking over it. Pickups stay on the ground for the rest of the area. When you clear an area, everything left is collected for you. Items that do not fit are automatically dismantled for their scrap value.</p>
+['loot','Loot and currency',()=>`<h3>Drops</h3><p>${Math.round(DROP.chance*100)}% of downed drones drop something you collect by walking over it. Pickups stay on the ground for the rest of the area. When you clear an area, or are overrun, everything left on the ground is collected for you. Items that do not fit are automatically dismantled for their scrap value.</p>
 ${tbl(['Drop','Chance','Details'],[['Scrap',Math.round(DROP.scrap*100)+'%','2 to 6 scrap times the wave number'],['Medkit',Math.round(DROP.medkit*100)+'%','Goes to your backpack'],['Overcharge',Math.round(DROP.boost*100)+'%','Goes to your backpack'],['Gear',Math.round(gearPct()*100)+'%','One random weapon, armor piece, artifact or companion']])}
 <p>That makes any one specific piece of gear drop about once per ${Math.round(1/(DROP.chance*gearPct()/GEAR.length))} drones. The Upgrade bench at Home does not sell gear yet.</p>
 <h3>Scrap</h3><p>Scrap is a currency, not an item. It never uses a backpack slot and is capped at ${SCRAP_CAP.toLocaleString()}. You have ${WAL.scrap.toLocaleString()}.</p>
-<h3>Items and stacks</h3><p>Your backpack has ${INV.cap} slots. Items stack up to 999 per slot, so a pile of medkits uses one slot. Equipment does not stack. Dismantle items from the inventory for their listed scrap value. The two item slots reference a stack in your backpack and consume one item each time you use them.</p>
+<h3>Supply caches</h3><p>The first time you clear an area, a supply cache appears in it. Stand next to it and press ${keyName(B.use)} (or tap the prompt) to open it for scrap and either two medkits or a piece of gear. Each area has one cache, and it can only be opened once.</p><h3>Items and stacks</h3><p>Your backpack has ${INV.cap} slots. Items stack up to 999 per slot, so a pile of medkits uses one slot. Equipment does not stack. New gear goes straight into a matching empty slot, and new consumables fill an empty item slot. Dismantle items from the inventory for their listed scrap value. The two item slots reference a stack in your backpack and consume one item each time you use them.</p>
 <h3>Abilities</h3><p>Abilities are stored separately from items and cannot be discarded or dismantled. Select an ability to equip it in its matching ability slot.</p>
 ${tbl(['Item','Effect','Owned'],ofKind(t=>!t.slot).map(k=>[ITEMS[k].name,ITEMS[k].desc,count(k)]))}`],
 ['weapons','Weapons',()=>`<h3>Using weapons</h3><p>You have three weapon slots. Switch with ${['w1','w2','w3'].map(k=>keyName(B[k])).join(', ')}. Equip weapons from the inventory. Your weapon is holstered at Home. Overcharge halves the delay between shots. A weapon in an empty slot cannot fire.</p>
@@ -975,7 +986,7 @@ ${tbl(['Companion','Output','Every','Range','Rate','Status'],ofKind(t=>t.slot===
 ['stats','Stats explained',()=>`${tbl(['Stat','Meaning'],[['Health','100 plus any max health bonuses. Medkits restore 35. Health refills when you arrive Home.'],['Armor','Total armor from equipped pieces, converted to damage reduction as described under Armor.'],['Move speed','6 walking and 9 sprinting, multiplied by any speed bonuses.'],['Weapon damage','Health removed from a drone per hit. Drones have 2 health.'],['Fire rate','Shots per second of your active weapon, doubled by Overcharge.'],['Overcharge','Lasts 8 seconds after use.'],['Companion','Damage and delay of your companion, if any.'],['Drones downed','Lifetime total across all runs.'],['Areas cleared','Areas you have cleared out of all areas in every world.'],['Scrap','Currency, capped at '+SCRAP_CAP.toLocaleString()+'.'],['Slots','Backpack slots in use. Each stack holds up to 999.']])}
 <h3>Saving</h3><p>Progress, options, bindings, inventory and equipment save automatically in this browser. Reset all save data in Options clears everything.</p>`],
 ['home','Home',()=>`<p>Home is a neutral zone and where every session starts. No drones appear, your weapon is holstered, and you heal fully on arrival. Returning home brings you back to safety.</p>
-<h3>Pads</h3>${tbl(['Pad','Use'],[['Map (cyan)','Opens the world map so you can travel to an area.'],['Upgrade bench (gold)','Spend scrap on upgrades. Nothing is for sale yet.']])}`]
+<h3>Stations</h3><p>Stand next to a station and press ${keyName(B.use)} (or tap the prompt that appears) to use it.</p>${tbl(['Station','Use'],[['Map (cyan)','Opens the world map so you can travel to an area.'],['Upgrade bench (gold)','Spend scrap on upgrades. Nothing is for sale yet.'],['Compendium (violet)','Opens this in-game guide.'],...(OPT.dev?[['Dev pedestal (magenta)','Opens the developer menu.']]:[])])}`]
 ];
 function renderComp(){
   const t=COMP.find(c=>c[0]===compTab);
@@ -984,27 +995,32 @@ function renderComp(){
 compEl.onclick=e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.x)return closeComp();if(b.dataset.t){compTab=b.dataset.t;renderComp();compEl.scrollTop=0}};
 function compendium(back){if(state==='play'){state='paused';release()}compBack=back;compEl.classList.add('on');renderComp()}
 function closeComp(){compEl.classList.remove('on');const b=compBack;compBack=null;if(b)b()}
-function exitGame(){state='menu';release();screen('Game closed','Thanks for playing. Your progress is saved.');btn('Reopen',mainMenu,'main');try{window.close()}catch(e){}}
+function exitGame(){state='menu';release();screen('Game closed','Thanks for playing. Your progress is saved.');btn('Reopen',goHome,'main');try{window.close()}catch(e){}}
 // Home: a neutral, weapon-free hub. Pads open the map and the upgrade bench.
 const homeGroup=new THREE.Group();homeGroup.visible=false;scene.add(homeGroup);
-const HOME_BOXES=[{x:-9,z:-9.5,hw:1.5,hd:.8},{x:9,z:-9.5,hw:1.7,hd:.7}];
-const HOME_PADS=[{x:-9,z:-6,act:()=>worldMap(null,null,resume)},{x:9,z:-6,act:()=>upgrades(resume)}];
+const HOME_BOXES=[{x:-9,z:-9.5,hw:1.5,hd:.8},{x:9,z:-9.5,hw:1.7,hd:.7},{x:0,z:-9.5,hw:1.2,hd:.8}];
+const HOME_PADS=[{x:-9,z:-6,label:'Open map',menu:true,act:()=>worldMap(null,null,resume)},{x:9,z:-6,label:'Upgrade bench',menu:true,act:()=>upgrades(resume)},{x:0,z:-6,label:'Open compendium',menu:true,act:()=>compendium(resume)},{x:13,z:4,label:'Open dev menu',menu:true,on:()=>OPT.dev,act:()=>devMenu(resume)}];
 const UPGRADES=[]; // later: {id,name,desc,cost}; ownership is saved in Store.data.upgrades
+const devPed=new THREE.Group();devPed.visible=false;homeGroup.add(devPed);
 (function(){
   const plaza=new THREE.Mesh(new THREE.CircleGeometry(17,40),new THREE.MeshLambertMaterial({color:0x56626a}));
   plaza.rotation.x=-Math.PI/2;plaza.position.y=.03;homeGroup.add(plaza);
-  [[-9,0x46e0d0,'Map',1.5,1],[9,0xffd23f,'Upgrades',1.7,1.2]].forEach(([x,c,t,hw,h])=>{
+  [[-9,0x46e0d0,'Map',1.5,1],[9,0xffd23f,'Upgrades',1.7,1.2],[0,0xb58cff,'Compendium',1.2,1.6]].forEach(([x,c,t,hw,h])=>{
     const pad=new THREE.Mesh(new THREE.CircleGeometry(2.2,32),new THREE.MeshBasicMaterial({color:c,fog:false}));
     pad.rotation.x=-Math.PI/2;pad.position.set(x,.06,-6);homeGroup.add(pad);
     const tb=new THREE.Mesh(new THREE.BoxGeometry(hw*2,h,1.4),new THREE.MeshLambertMaterial({color:c,emissive:c,emissiveIntensity:.35}));
     tb.position.set(x,h/2,-9.5);homeGroup.add(tb);
     const l=label(t);l.position.set(x,4.2,-6);homeGroup.add(l);
   });
-  const sign=label('Home');sign.position.set(0,5,-14);sign.scale.set(12,2.2,1);homeGroup.add(sign);
+  const mat=c=>new THREE.MeshBasicMaterial({color:c,fog:false});
+  const base=new THREE.Mesh(new THREE.CylinderGeometry(.8,1,1.1,16),new THREE.MeshLambertMaterial({color:0x3a3350}));base.position.set(13,.55,4);
+  const orb=new THREE.Mesh(new THREE.OctahedronGeometry(.45),mat(0xff3d6e));orb.position.set(13,1.9,4);
+  const ring=new THREE.Mesh(new THREE.CircleGeometry(2.2,32),mat(0xff3d6e));ring.rotation.x=-Math.PI/2;ring.position.set(13,.06,4);
+  const dl=label('Dev');dl.position.set(13,3.6,4);devPed.add(base,orb,ring,dl);
 })();
 function enterHome(){
-  inHome=true;areaClear=true;padHot=null;homeGroup.visible=true;gun.visible=false;
-  gates.splice(0).forEach(g=>scene.remove(g.m));buildCrates(0);boxes.push(...HOME_BOXES);
+  inHome=true;areaClear=true;padHot=null;removeCache();homeGroup.visible=true;gun.visible=false;
+  gates.splice(0).forEach(g=>scene.remove(g.m));buildCrates(0);boxes.push(...HOME_BOXES);syncDev();
   scene.background.setHex(0x2e3a4a);scene.fog.color.setHex(0x9a8a7a);
   enemies.splice(0).forEach(m=>scene.remove(m));leavePickups();boostT=0;lastDamageAt=gameTime;lastSpectreHeal=gameTime;
   setHp(maxHp());jumpHeight=jumpVelocity=0;jumpsUsed=glideTime=0;glideActive=false;P.x=0;P.z=10;P.yaw=P.pitch=0;camera.position.set(0,1.7,10);camera.rotation.set(0,0,0);
@@ -1015,6 +1031,72 @@ function upgrades(back){
   UPGRADES.forEach(u=>{const own=Store.data.upgrades[u.id];
     btn(u.name+': '+u.desc+(own?' (owned)':' ['+u.cost+' scrap]'),()=>{if(WAL.scrap>=u.cost){WAL.scrap-=u.cost;hudScrap();Store.data.upgrades[u.id]=1;save();upgrades(back)}},'',own||WAL.scrap<u.cost)});
   btn('Close',back,'main');
+}
+// Use key: interact with the nearest station at Home, or the supply cache in a cleared area
+let cache=null;
+function removeCache(){if(cache){scene.remove(cache.m);cache=null}}
+function spawnCache(){
+  removeCache();if(inHome||!areaClear||PROG.looted[LV.id])return;
+  let x=0,z=0;
+  for(let i=0;i<40;i++){x=(Math.random()-.5)*50;z=(Math.random()-.5)*50;if(Math.hypot(x,z)>6&&!boxes.some(b=>Math.abs(x-b.x)<b.hw+2.5&&Math.abs(z-b.z)<b.hd+2.5))break}
+  const m=new THREE.Group(),c=0xffd23f,body=new THREE.Mesh(new THREE.BoxGeometry(1.6,1,1.1),new THREE.MeshLambertMaterial({color:c,emissive:c,emissiveIntensity:.35}));
+  body.position.y=.5;const l=label('Supply cache');l.position.y=2.6;m.add(body,l);m.position.set(x,0,z);scene.add(m);
+  cache={m,x,z,label:'Open supply cache',act:openCache};
+}
+function openCache(){
+  const rolls=[{id:'scrap',n:Math.ceil((15+Math.random()*25)*LV.waves)},Math.random()<.35?{id:GEAR[Math.floor(Math.random()*GEAR.length)],n:1}:{id:'medkit',n:2}];
+  rolls.forEach(k=>collect(k,true));
+  PROG.looted[LV.id]=true;removeCache();save();syncHud();beep(880,.3,'sine',.1);
+  const extra=rolls.reduce((t,k)=>t+(k.salvaged||0),0);
+  toast('Cache opened: '+rolls.map(k=>k.id==='scrap'?k.n+' scrap':(k.n>1?k.n+' ':'')+ITEMS[k.id].name+(k.equipped?' (equipped)':'')).join(', ')+(extra?' (backpack full, '+extra+' salvaged)':''),3500);
+}
+function nearestUse(){
+  let best=null,bd=3;
+  for(const u of inHome?HOME_PADS:cache?[cache]:[]){if(u.on&&!u.on())continue;const d=Math.hypot(P.x-u.x,P.z-u.z);if(d<bd){bd=d;best=u}}
+  return best;
+}
+function doUse(){
+  const u=nearestUse();if(!u){toast('Nothing nearby to use');return}
+  if(u.menu){state='paused';release()}
+  u.act();
+}
+function updatePrompt(){
+  const u=state==='play'?nearestUse():null,e=$('usePrompt');
+  e.classList.toggle('on',!!u);
+  if(u){const t='['+keyName(B.use)+'] '+u.label;if(e.textContent!==t)e.textContent=t}
+}
+$('usePrompt').onclick=doUse;
+// Developer options: switched on in Options. Adds the Home pedestal and a dev menu (also in the pause menu).
+let god=false;const DEV_BOX={x:13,z:4,hw:.8,hd:.8};
+function syncDev(){
+  devPed.visible=!!OPT.dev;if(!OPT.dev)god=false;
+  const i=boxes.indexOf(DEV_BOX);
+  if(OPT.dev&&inHome){if(i<0)boxes.push(DEV_BOX)}else if(i>=0)boxes.splice(i,1);
+}
+function devMenu(back,note){
+  screen('Developer menu',note||'Testing tools. Scrap, items and progress changes are saved.');
+  btn('God mode: '+(god?'On':'Off'),()=>{god=!god;devMenu(back,'God mode '+(god?'on':'off')+'.')});
+  btn('Heal to full',()=>{setHp(maxHp());devMenu(back,'Healed to full.')});
+  btn('Add 10,000 scrap',()=>{addScrap(10000);save();devMenu(back,'Scrap: '+WAL.scrap.toLocaleString())});
+  btn('Max out scrap',()=>{addScrap(SCRAP_CAP);save();devMenu(back,'Scrap: '+WAL.scrap.toLocaleString())});
+  btn('Give item...',()=>devItems(back));
+  btn('Travel to any area...',()=>devTravel(back));
+  btn('Unlock all areas',()=>{NODES.forEach(n=>{if(!isDone(n))PROG.done[n.id]=0});save();devMenu(back,'All areas and worlds unlocked.')});
+  btn('Reset supply caches',()=>{Object.keys(PROG.looted).forEach(k=>delete PROG.looted[k]);save();devMenu(back,'Supply caches reset.')});
+  btn('Remove all drones',()=>{enemies.splice(0).forEach(m=>scene.remove(m));devMenu(back,'Drones removed. Resume to finish the area.')});
+  btn('Close',back,'main');
+}
+function devItems(back){
+  screen('Give item','Stackables give 10, equipment gives 1.');
+  Object.keys(ITEMS).forEach(id=>btn(ITEMS[id].name+' ['+(ITEMS[id].slot==='item'?'item':ITEMS[id].slot)+']',()=>{
+    const k={id,n:ITEMS[id].slot==='item'?10:1};collect(k,true);save();refreshQuick();devItems(back);$('m').textContent='Gave '+ITEMS[id].name+(k.equipped?' (equipped).':k.salvaged?' (backpack full, salvaged).':'.');
+  }));
+  btn('Back',()=>devMenu(back),'main');
+}
+function devTravel(back){
+  screen('Travel to any area','Ignores locks. Undefeated areas start a fight.');
+  NODES.forEach(n=>btn(n.w.name+': '+n.name,()=>enterArea(n,null,false)));
+  btn('Back',()=>devMenu(back),'main');
 }
 function gatePos(a,b){const dx=b.x-a.x,dy=b.y-a.y,l=Math.max(Math.abs(dx),Math.abs(dy))||1;return{x:dx/l*39,z:dy/l*39}}
 function label(t,color='#fff4dc'){
@@ -1049,34 +1131,40 @@ function enterArea(n,from,force){
   if(from){const g=gatePos(n,from);P.x=g.x*.8;P.z=g.z*.8;P.yaw=Math.atan2(g.x,g.z)}
   else{setHp(maxHp());score=0;$('sc').textContent=0}
   wave=0;$('lv').textContent=n.name;save();
-  spawnGates();
+  spawnGates();spawnCache();
   if(areaClear)$('wv').textContent='Clear';else spawnWave();
   resume();
 }
 function resume(){state='play';ov.style.display='none';$('pb').classList.add('on');$('quick').classList.add('on');refreshQuick();if(!isTouch)renderer.domElement.requestPointerLock()}
 function pause(){
-  state='paused';release();screen('Paused',inHome?'Home.':LV.name+', '+LV.w.name+'. Score '+score+'.');
-  btn('Resume',resume,'main');btn('Map',()=>worldMap(null,null,pause));if(!inHome)btn('Restart area',()=>enterArea(LV,null,true));
-  btn('Inventory',()=>inventory(pause));btn('Compendium',()=>compendium(pause));btn('Options',()=>options(pause));btn('Return home',mainMenu);
+  state='paused';release();
+  screen(inHome?'Salt Flats Drone Defense':'Paused',inHome?'Home. You are safe here.':LV.name+', '+LV.w.name+'. Score '+score+'.');
+  btn('Resume',resume,'main');btn('Map',()=>worldMap(null,null,pause));btn('Inventory',()=>inventory(pause));
+  btn('Compendium',()=>compendium(pause));btn('Options',()=>options(pause));
+  if(OPT.dev)btn('Dev menu',()=>devMenu(pause));
+  if(!inHome){btn('Restart area',()=>enterArea(LV,null,true));btn('Return home',goHome)}
+  btn('Exit game',exitGame);
 }
 function complete(){
   areaClear=true;const first=!isDone(LV);
-  PROG.done[LV.id]=Math.max(PROG.done[LV.id]||0,score);save();$('wv').textContent='Clear';spawnGates();beep(880,.3,'sine',.1);
+  PROG.done[LV.id]=Math.max(PROG.done[LV.id]||0,score);save();$('wv').textContent='Clear';spawnGates();spawnCache();beep(880,.3,'sine',.1);
   const nw=LV.final&&WORLDS[WORLDS.indexOf(LV.w)+1];
   const r=autoCollect(),finish=()=>{
     if(nw&&first){state='won';release();screen(LV.w.name+' cleared','Score '+score+'. '+nw.name+' is now on the map.');
-      btn('Open map',()=>worldMap(nw,null,mainMenu),'main');btn('Keep exploring',resume);return}
+      btn('Open map',()=>worldMap(nw,null,resume),'main');btn('Keep exploring',resume);return}
     if(state!=='play')resume();
     const rewards=[];
     if(r.got)rewards.push(r.got+' pickup'+(r.got>1?'s':'')+' collected');
     if(r.salvaged)rewards.push(r.salvaged+' scrap salvaged');
+    if(r.equipped.length)rewards.push('equipped '+r.equipped.join(', '));
     toast(rewards.length?'Area clear. '+rewards.join('; ')+'.':'Area clear. Follow a gate to travel on.');
   };
-  if(r.left.length)warnFull(finish);else finish();
+  if(r.items)notifyFull(r,finish);else finish();
 }
 function over(){
-  state='over';release();screen('Overrun at '+LV.name,'Score '+score+'. The flats go quiet.');
-  btn('Retry area',()=>enterArea(LV,null,true),'main');btn('Open map',()=>worldMap(null,null,over));btn('Return home',mainMenu);
+  state='over';release();const r=autoCollect();
+  screen('Overrun at '+LV.name,'Score '+score+'. '+(r.got?'Everything that dropped was collected'+(r.items?'; '+r.items+' item'+(r.items>1?'s':'')+' did not fit and '+(r.items>1?'were':'was')+' salvaged for '+r.salvaged+' scrap':'')+'.':'The flats go quiet.'));
+  btn('Retry area',()=>enterArea(LV,null,true),'main');btn('Open map',()=>worldMap(null,null,over));btn('Return home',goHome);
 }
 $('pb').addEventListener('click',()=>{if(state==='play')pause()});
 
@@ -1154,9 +1242,7 @@ function tick(){
       }else e.userData.knockback.set(0,0,0);
       resolve(e.position,enemyHitboxRadius(e));
       if(d<e.userData.contactRange&&jumpHeight<1.1&&hurtCd<=0){
-        hurtCd=.7;P.hp-=e.userData.damage*(1-armorRed());lastDamageAt=gameTime;hudHp();
-        $('vig').style.opacity=.9;setTimeout(()=>$('vig').style.opacity=0,200);beep(110,.2,'sawtooth',.1);
-        if(P.hp<=0){over()}
+        hurtCd=.7;hurtPlayer(e.userData.damage);
       }
     }
     separateActors();
@@ -1178,10 +1264,8 @@ function tick(){
         scene.remove(p.mesh);projectiles.splice(i,1);continue;
       }
       if(p.owner==='enemy'&&Math.hypot(p.mesh.position.x-P.x,p.mesh.position.y-(1.7+jumpHeight),p.mesh.position.z-P.z)<.9){
-        P.hp-=p.damage*(1-armorRed());lastDamageAt=gameTime;hudHp();
-        $('vig').style.opacity=.9;setTimeout(()=>$('vig').style.opacity=0,200);beep(110,.2,'sawtooth',.1);
-        scene.remove(p.mesh);projectiles.splice(i,1);
-        if(P.hp<=0){over();break}
+        scene.remove(p.mesh);projectiles.splice(i,1);hurtPlayer(p.damage);
+        if(state!=='play')break;
         continue;
       }
       if(p.life<=0){scene.remove(p.mesh);projectiles.splice(i,1)}
@@ -1193,15 +1277,12 @@ function tick(){
         else if(!k.warned){k.warned=1;toast('Inventory full')}
       }
     }
-    if(inHome){
-      let on=null;for(const d of HOME_PADS)if(Math.hypot(P.x-d.x,P.z-d.z)<2.2)on=d;
-      if(!on)padHot=null;else if(on!==padHot){padHot=on;state='paused';release();on.act()}
-    }
     for(const g of gates)if(g.active&&Math.hypot(P.x-g.x,P.z-g.z)<2.8){enterArea(g.node,LV);break}
     $('dr').textContent=enemies.length;
     if(state==='play'&&!areaClear&&!enemies.length){if(wave>=LV.waves)complete();else spawnWave()}
   }
   gameTime += dt;
+  updatePrompt();
   for(let i=bits.length-1;i>=0;i--){
     const b=bits[i];b.t-=dt;b.v.y-=14*dt;b.m.position.addScaledVector(b.v,dt);
     if(b.t<=0){scene.remove(b.m);bits.splice(i,1)}
@@ -1217,6 +1298,7 @@ tick();
 enterHome();state='play';ov.style.display='none';
 $('pb').classList.add('on');$('quick').classList.add('on');refreshQuick();
 document.addEventListener('pointerdown',unlockAudio);
+addEventListener('pagehide',()=>{autoCollect()});
 toast(isTouch?'Stick to move, drag to look, JUMP leaps or activates Glide in midair. AIM zooms.':'Click to look around. Space jumps or activates Glide in midair; hold right mouse to aim. Esc opens the menu.',5000);
 })();
 </script>
