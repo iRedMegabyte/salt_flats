@@ -462,8 +462,8 @@ const DEFAULT_SCRAP_VALUE=5;
 for(const item of Object.values(ITEMS))item.scrap??=DEFAULT_SCRAP_VALUE;
 let gunModelId;
 const WEAPON_ARCHETYPES={
-  base:{materials:{frame:0x303447,edge:0x171b28,accent:0x46e0d0,barrel:0x727c87},projectile:{speed:28,mass:.1,radius:.07,color:0x46e0d0},muzzleZ:-.4,parts:[]},
-  sidearm:{extends:'base',projectile:{speed:32,mass:.09,radius:.075,color:0x46e0d0},muzzleZ:-.44,parts:[
+  base:{materials:{frame:0x303447,edge:0x171b28,accent:0x46e0d0,barrel:0x727c87},projectile:{speed:48,mass:.1,radius:.07,color:0x46e0d0},muzzleZ:-.4,parts:[]},
+  sidearm:{extends:'base',projectile:{speed:48,mass:.09,radius:.075,color:0x46e0d0},muzzleZ:-.44,parts:[
     {shape:'box',size:[.16,.16,.34],material:'frame',at:[0,0,.015]},
     {shape:'box',size:[.12,.1,.2],material:'edge',at:[0,.09,-.045]},
     {shape:'box',size:[.11,.23,.13],material:'edge',at:[0,-.15,.11],rotation:[-.18,0,0]},
@@ -472,7 +472,7 @@ const WEAPON_ARCHETYPES={
     {shape:'box',size:[.19,.035,.13],material:'edge',at:[0,.105,.105]},
     {shape:'box',size:[.17,.045,.08],material:'accent',at:[0,-.015,-.24]}
   ]},
-  compact:{extends:'base',projectile:{speed:38,mass:.045,radius:.055,color:0xff7048},muzzleZ:-.64,parts:[
+  compact:{extends:'base',projectile:{speed:48,mass:.045,radius:.055,color:0xff7048},muzzleZ:-.64,parts:[
     {shape:'box',size:[.17,.18,.48],material:'frame',at:[0,0,0]},
     {shape:'box',size:[.13,.07,.23],material:'edge',at:[0,.12,-.03]},
     {shape:'box',size:[.12,.22,.14],material:'edge',at:[0,-.16,.08],rotation:[-.12,0,0]},
@@ -482,7 +482,7 @@ const WEAPON_ARCHETYPES={
     {shape:'box',size:[.19,.035,.31],material:'edge',at:[0,.145,-.03]},
     {shape:'box',size:[.12,.035,.055],material:'accent',at:[0,-.085,.01]}
   ]},
-  rifle:{extends:'base',materials:{frame:0x59614a,edge:0x252c26,barrel:0x798078},projectile:{speed:24,mass:.32,radius:.11,color:0xd5ae55},muzzleZ:-.84,parts:[
+  rifle:{extends:'base',materials:{frame:0x59614a,edge:0x252c26,barrel:0x798078},projectile:{speed:72,mass:.32,radius:.11,color:0xd5ae55},muzzleZ:-.84,parts:[
     {shape:'box',size:[.18,.2,.54],material:'frame',at:[0,0,.02]},
     {shape:'box',size:[.15,.12,.26],material:'edge',at:[0,-.025,.37]},
     {shape:'box',size:[.13,.24,.15],material:'edge',at:[0,-.19,.04],rotation:[-.08,0,0]},
