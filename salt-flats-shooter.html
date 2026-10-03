@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Salt Flats Drone Defense</title>
+<link id="page-icon" rel="icon" type="image/png">
 <style>
 :root{--bg:#1b1d3d;--ink:#fff4dc;--hot:#ffd23f;--cool:#46e0d0;--bad:#ff3d6e;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1b1d3d}}
@@ -112,6 +113,26 @@ canvas{display:block;position:fixed;inset:0;width:100%;height:100%}
 <script>
 (function(){
 const $=id=>document.getElementById(id);
+function drawPageIcon(){
+  try{
+    const canvas=document.createElement('canvas');canvas.width=canvas.height=64;
+    const ctx=canvas.getContext('2d');
+    ctx.fillStyle='#1b1d3d';ctx.fillRect(0,0,64,64);
+    const hex=(radius)=>{
+      ctx.beginPath();
+      for(let i=0;i<6;i++){const a=-Math.PI/2+i*Math.PI/3,x=32+Math.cos(a)*radius,y=32+Math.sin(a)*radius;if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)}
+      ctx.closePath();
+    };
+    hex(27);ctx.fillStyle='#46e0d0';ctx.fill();
+    hex(20);ctx.fillStyle='#1b1d3d';ctx.fill();
+    hex(16);ctx.strokeStyle='#46e0d0';ctx.lineWidth=2;ctx.stroke();
+    ctx.strokeStyle='#ffd23f';ctx.lineWidth=3;ctx.lineCap='round';
+    [[32,13,32,22],[32,42,32,51],[13,32,22,32],[42,32,51,32]].forEach(([x1,y1,x2,y2])=>{ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke()});
+    ctx.beginPath();ctx.arc(32,32,4,0,Math.PI*2);ctx.fillStyle='#ffd23f';ctx.fill();
+    $('page-icon').href=canvas.toDataURL('image/png');
+  }catch(e){}
+}
+drawPageIcon();
 const isTouch='ontouchstart' in window||navigator.maxTouchPoints>0;
 if(isTouch)document.body.classList.add('touch');
 // Persistent storage: one versioned save object behind a swappable adapter
