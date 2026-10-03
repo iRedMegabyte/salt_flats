@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Salt Flats Drone Defense</title>
-<link id="page-icon" rel="icon" type="image/png">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Cpath%20fill%3D%22%2346e0d0%22%20d%3D%22M32%204%2056%2018v28L32%2060%208%2046V18z%22%2F%3E%3C%2Fsvg%3E">
 <style>
 :root{--bg:#1b1d3d;--ink:#fff4dc;--hot:#ffd23f;--cool:#46e0d0;--bad:#ff3d6e;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1b1d3d}}
@@ -50,7 +50,7 @@ canvas{display:block;position:fixed;inset:0;width:100%;height:100%}
 #quick.on{display:flex}
 #quick button{pointer-events:auto;font:inherit;font-size:13px;font-weight:700;color:var(--ink);background:#0007;border:1px solid #fff6;border-radius:8px;padding:6px 10px}
 #toast{position:absolute;left:50%;bottom:22%;transform:translateX(-50%);opacity:0;transition:opacity .25s;background:#0008;padding:8px 14px;border-radius:8px;font-weight:700}
-#menu.map{width:min(560px,100%);max-height:none}
+#menu.map{width:min(700px,100%);max-height:76vh}
 #menu.map svg{width:100%;height:auto;margin-bottom:4px}
 #menu.map g:focus-visible{outline:none}
 #menu.map g:focus-visible circle{stroke:#fff4dc}
@@ -113,26 +113,6 @@ canvas{display:block;position:fixed;inset:0;width:100%;height:100%}
 <script>
 (function(){
 const $=id=>document.getElementById(id);
-function drawPageIcon(){
-  try{
-    const canvas=document.createElement('canvas');canvas.width=canvas.height=64;
-    const ctx=canvas.getContext('2d');
-    ctx.fillStyle='#1b1d3d';ctx.fillRect(0,0,64,64);
-    const hex=(radius)=>{
-      ctx.beginPath();
-      for(let i=0;i<6;i++){const a=-Math.PI/2+i*Math.PI/3,x=32+Math.cos(a)*radius,y=32+Math.sin(a)*radius;if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)}
-      ctx.closePath();
-    };
-    hex(27);ctx.fillStyle='#46e0d0';ctx.fill();
-    hex(20);ctx.fillStyle='#1b1d3d';ctx.fill();
-    hex(16);ctx.strokeStyle='#46e0d0';ctx.lineWidth=2;ctx.stroke();
-    ctx.strokeStyle='#ffd23f';ctx.lineWidth=3;ctx.lineCap='round';
-    [[32,13,32,22],[32,42,32,51],[13,32,22,32],[42,32,51,32]].forEach(([x1,y1,x2,y2])=>{ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke()});
-    ctx.beginPath();ctx.arc(32,32,4,0,Math.PI*2);ctx.fillStyle='#ffd23f';ctx.fill();
-    $('page-icon').href=canvas.toDataURL('image/png');
-  }catch(e){}
-}
-drawPageIcon();
 const isTouch='ontouchstart' in window||navigator.maxTouchPoints>0;
 if(isTouch)document.body.classList.add('touch');
 // Persistent storage: one versioned save object behind a swappable adapter
@@ -850,9 +830,43 @@ function mainMenu(){
   state='menu';release();if(!inHome)enterHome();screen('Salt Flats Drone Defense','You are home and safe. Chart a route across the map when you are ready.');
   btn('Enter home',resume,'main');btn('Open map',()=>worldMap(null,null,mainMenu));btn('Inventory',()=>inventory(mainMenu));btn('Options',()=>options(mainMenu));btn('Compendium',()=>compendium(mainMenu));btn('Exit game',exitGame);
 }
+function worldOverview(back){
+  screen('All destinations','Select a world or any destination to inspect it. Open destinations can be entered from their detail view.');
+  const columns=2,rowH=108,height=Math.ceil(WORLDS.length/columns)*rowH;
+  let h=`<svg viewBox="0 0 320 ${height}" role="group" aria-label="All worlds and destinations">`;
+  WORLDS.forEach((w,index)=>{
+    const ox=(index%columns)*160+3,oy=Math.floor(index/columns)*rowH+3;
+    const minX=Math.min(...w.nodes.map(n=>n.x)),maxX=Math.max(...w.nodes.map(n=>n.x));
+    const minY=Math.min(...w.nodes.map(n=>n.y)),maxY=Math.max(...w.nodes.map(n=>n.y));
+    const px=n=>ox+8+(n.x-minX)/(maxX-minX||1)*136;
+    const py=n=>oy+29+(n.y-minY)/(maxY-minY||1)*48;
+    const open=worldOpen(w);
+    h+=`<rect x="${ox}" y="${oy}" width="154" height="102" rx="3" fill="#ffffff08" stroke="${open?'#46e0d0':'#7b858c'}" stroke-opacity=".65"/>`;
+    h+=`<g data-world-map="${w.id}" tabindex="0" role="button" aria-label="Open ${w.name}${open?'':' (locked)'}" style="cursor:pointer"><rect x="${ox+1}" y="${oy+1}" width="152" height="19" fill="${open?'#46e0d022':'#7b858c22'}"/><text x="${ox+6}" y="${oy+13}" font-size="7" font-weight="700" fill="${open?'#46e0d0':'#a3adb2'}">${w.name}${open?'':' (locked)'}</text></g>`;
+    w.nodes.forEach(n=>nbrs(n).forEach(m=>{if(n.id<m.id)h+=`<line x1="${px(n)}" y1="${py(n)}" x2="${px(m)}" y2="${py(m)}" stroke="${isDone(n)||isDone(m)?'#46e0d0':'#7b858c'}" stroke-opacity=".65" stroke-width="1"/>`}));
+    w.nodes.forEach(n=>{
+      const available=canGo(n),done=isDone(n),here=n===LV;
+      const fill=done?'#ffd23f':available?'#46e0d0':'#515b63';
+      const stroke=here?'#fff4dc':done?'#ffd23f':available?'#46e0d0':'#7b858c';
+      h+=`<g data-map-node="${n.id}" tabindex="0" role="button" aria-label="${n.name}, ${available?'open':'locked'}${done?', cleared':''}" style="cursor:pointer"><circle cx="${px(n)}" cy="${py(n)}" r="${n.final?4.3:3.5}" fill="${fill}" stroke="${stroke}" stroke-width="${here?1.5:1}"/><text x="${px(n)}" y="${py(n)+8}" text-anchor="middle" font-size="4.2" font-weight="700" fill="${available||done?'#fff4dc':'#a3adb2'}">${n.name}</text>${n.final?`<text x="${px(n)}" y="${py(n)+1.5}" text-anchor="middle" font-size="3.5" fill="#1b1d3d">&#9733;</text>`:''}</g>`;
+    });
+  });
+  menu.innerHTML=h+'</svg>';menu.className='map';mapOpen=true;
+  menu.querySelectorAll('[data-world-map]').forEach(el=>{
+    const w=WORLDS.find(x=>x.id===el.dataset.worldMap),open=()=>worldMap(w,null,back);
+    el.onclick=open;el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();open()}};
+  });
+  menu.querySelectorAll('[data-map-node]').forEach(el=>{
+    const n=nodeById(el.dataset.mapNode),open=()=>worldMap(n.w,n,back);
+    el.onclick=open;el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();open()}};
+  });
+  btn('Back',back||mainMenu);
+}
 function worldMap(w,sel,back){
-  w=w||LV.w;sel=sel||(w===LV.w?LV:null);const wi=WORLDS.indexOf(w);
-  screen(w.name,sel?sel.name+': '+sel.desc+' '+sel.waves+' waves'+(isDone(sel)?'. Cleared, best '+PROG.done[sel.id]+'.':'.'):'Pick a destination on the map.');
+  if(!w)return worldOverview(back);
+  sel=sel||(w===LV.w?LV:null);const wi=WORLDS.indexOf(w);
+  const details=sel?sel.name+': '+sel.desc+' '+sel.waves+' waves'+(isDone(sel)?'. Cleared, best '+PROG.done[sel.id]+'.':canGo(sel)?'. Open destination.':'. Locked destination.'):'Pick a destination on the map.';
+  screen(w.name,details);
   let h='<svg viewBox="0 0 160 100" role="group" aria-label="World map">';
   w.nodes.forEach(n=>nbrs(n).forEach(m=>{if(n.id<m.id){const ok=isDone(n)||isDone(m);h+=`<line x1="${n.x}" y1="${n.y}" x2="${m.x}" y2="${m.y}" stroke="${ok?'#46e0d0':'#fff5'}" stroke-width="1.4" ${ok?'':'stroke-dasharray="3 3"'}/>`}}));
   w.nodes.forEach(n=>{
@@ -860,11 +874,12 @@ function worldMap(w,sel,back){
     h+=`<g data-n="${n.id}" ${g?'tabindex="0" role="button" style="cursor:pointer"':'opacity=".4"'} aria-label="${n.name}${g?'':' (locked)'}"><circle cx="${n.x}" cy="${n.y}" r="${n===sel?9:7}" fill="${d?'#ffd23f':'#1b1d3d'}" stroke="${here?'#fff4dc':g?'#46e0d0':'#fff6'}" stroke-width="${here?2.6:1.6}"/>${n.final?`<text x="${n.x}" y="${n.y+2.6}" text-anchor="middle" font-size="7" fill="${d?'#1b1d3d':'#ffd23f'}">&#9733;</text>`:''}<text x="${n.x}" y="${n.y+16}" text-anchor="middle" font-size="5.5" font-weight="700" fill="#fff4dc">${n.name}</text></g>`;
   });
   menu.innerHTML=h+'</svg>';menu.className='map';mapOpen=true;
-  menu.querySelectorAll('g[data-n]').forEach(g=>{const n=nodeById(g.dataset.n);if(!canGo(n))return;const f=()=>worldMap(w,n,back);g.onclick=f;g.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();f()}}});
+  menu.querySelectorAll('g[data-n]').forEach(g=>{const n=nodeById(g.dataset.n);const f=()=>worldMap(w,n,back);g.onclick=f;g.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();f()}}});
   if(sel&&canGo(sel)){
     if(sel===LV&&state==='paused'&&!inHome)btn('Back to '+sel.name,resume,'main');
     else btn('Travel to '+sel.name,()=>enterArea(sel,null,false),'main');
   }
+  btn('All destinations',()=>worldOverview(back));
   if(wi>0)btn('Previous world: '+WORLDS[wi-1].name,()=>worldMap(WORLDS[wi-1],null,back));
   if(WORLDS[wi+1]&&worldOpen(WORLDS[wi+1]))btn('Next world: '+WORLDS[wi+1].name,()=>worldMap(WORLDS[wi+1],null,back));
   else if(WORLDS[wi+1])btn('Next world locked: clear the '+w.nodes.find(n=>n.final).name,()=>{},'',true);
