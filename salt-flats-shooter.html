@@ -231,7 +231,7 @@ const flash=new THREE.PointLight(0xffd23f,0,8);flash.position.set(0,0,-1);camera
 
 // State
 const P={x:0,z:0,yaw:0,pitch:0,hp:100};
-let jumpHeight=0,jumpVelocity=0,jumpPressed=false,jumpsUsed=0,glideTime=0;
+let jumpHeight=0,jumpVelocity=0,jumpPressed=false,jumpsUsed=0,glideTime=0,glideActive=false;
 let state='menu',score=0,wave=0,fireCd=0,flashT=0,hurtCd=0,bob=0;
 let gameTime=0,lastDamageAt=0,lastSpectreHeal=0;
 const enemies=[],bits=[],projectiles=[];
@@ -483,9 +483,9 @@ const ITEMS={
 const DEFAULT_SCRAP_VALUE=5;
 for(const item of Object.values(ITEMS))item.scrap??=DEFAULT_SCRAP_VALUE;
 const ABILITIES={
- basicJump:{name:'Basic Jump',jumpVelocity:8.5,jumps:1,desc:'A standard grounded jump.'},
- doubleJump:{name:'Double Jump',jumpVelocity:8.5,jumps:2,desc:'Jump a second time while airborne.'},
- glide:{name:'Glide',jumpVelocity:8.5,jumps:1,glideDecay:1.6,maxGlideFallSpeed:3.2,minGlideFallSpeed:.75,desc:'Automatically glides on descent; fall speed decays logarithmically.'}
+ basicJump:{name:'Basic Jump',jumpVelocity:10.5,jumps:1,desc:'A standard grounded jump.'},
+ doubleJump:{name:'Double Jump',jumpVelocity:10.5,jumps:2,desc:'Jump a second time while airborne.'},
+ glide:{name:'Glide',jumpVelocity:10.5,jumps:1,glideDecay:1.6,maxGlideFallSpeed:3.2,minGlideFallSpeed:.75,desc:'Press Jump in midair to activate; fall speed then decays logarithmically.'}
 };
 let gunModelId;
 const WEAPON_ARCHETYPES={
@@ -701,7 +701,7 @@ function info(id){
   if(t.heal)p.push('Heals '+Math.round(t.heal*100)+'% max HP every '+t.interval+'s after '+t.wait+'s of no damage');
   if(t.jumpVelocity)p.push('Jump velocity '+t.jumpVelocity);
   if(t.jumps>1)p.push((t.jumps-1)+' extra midair jump');
-  if(t.glideDecay)p.push('Automatic glide with logarithmic fall-speed decay');
+  if(t.glideDecay)p.push('Press Jump in midair to activate logarithmic glide');
   return (t.desc?t.desc+' ':'')+p.join(', ');
 }
 function cell(a,k,label,id,extra,sel){const item=ITEMS[id]||ABILITIES[id];return `<button class="cell ${id?'':'empty'} ${sel?'sel':''}" data-a="${a}" data-k="${k}"><small>${label}</small>${item?item.name:'Empty'}${extra||''}</button>`}
@@ -872,7 +872,7 @@ const COMP=[
 ['basics','Basics',()=>`<h3>Goal</h3><p>Drones have overrun the flats. Home is your safe base. Travel out on the map, clear each area of its drone waves, and push on to a world's final area (marked with a star) to open the next world.</p>
 <h3>Controls</h3>${tbl(['Action','Key'],[['Move',[B.forward,B.left,B.back,B.right].map(keyName).join(' ')+' or arrow keys'],['Look','Mouse (click the game to capture it)'],['Fire','Mouse click'],['Aim down sights','Hold right mouse button'],...ACTIONS.filter(a=>!['forward','back','left','right'].includes(a[0])).map(([a,l])=>[l,keyName(B[a])]),['Pause, or close a menu','Esc']])}
 <p>Change any keyboard action in Options, then Controls. Mouse click, right mouse, and Esc are fixed.</p>
-<h3>Touch</h3><p>Use the left stick to move, drag the right side of the screen to look, tap JUMP to leap, hold Fire to shoot, and hold AIM to zoom and steady your weapon. The II button pauses. The item buttons at the top left use medkits and Overcharge and open the inventory.</p>`],
+<h3>Touch</h3><p>Use the left stick to move, drag the right side of the screen to look, tap JUMP to leap or activate Glide in midair, hold Fire to shoot, and hold AIM to zoom and steady your weapon. The II button pauses. The item buttons at the top left use medkits and Overcharge and open the inventory.</p>`],
 ['worlds','Worlds and map',()=>`<h3>How travel works</h3><p>Each world is a map of areas joined by paths. Open the map with ${keyName(B.map)}, from the pause menu, or at the Map pad at Home. Pick an open area and travel there. The first area of a world is always open. Other areas open once a neighboring area is cleared. A world opens when the final area of the world before it is cleared.</p>
 <p>You clear an area by defeating all of its waves. Gates then appear on its edge, one for each path, labeled with where it leads. Walk into a gate to travel. Cleared areas are peaceful when you return. Use Restart area in the pause menu to fight there again.</p>
 ${WORLDS.map(w=>`<h3>${w.name}${worldOpen(w)?'':' (locked)'}</h3>${tbl(['Area','Waves','Drone speed','Crates','Status','Best score'],w.nodes.map(n=>[n.name+(n.final?' \u2605':''),n.waves,'x'+n.speed,n.crates,isDone(n)?'Cleared':canGo(n)?'Open':'Locked',PROG.done[n.id]??'-']))}`).join('')}`],
@@ -933,7 +933,7 @@ function enterHome(){
   gates.splice(0).forEach(g=>scene.remove(g.m));buildCrates(0);boxes.push(...HOME_BOXES);
   scene.background.setHex(0x2e3a4a);scene.fog.color.setHex(0x9a8a7a);
   enemies.splice(0).forEach(m=>scene.remove(m));leavePickups();boostT=0;lastDamageAt=gameTime;lastSpectreHeal=gameTime;
-  setHp(maxHp());jumpHeight=jumpVelocity=0;jumpsUsed=glideTime=0;P.x=0;P.z=10;P.yaw=P.pitch=0;camera.position.set(0,1.7,10);camera.rotation.set(0,0,0);
+  setHp(maxHp());jumpHeight=jumpVelocity=0;jumpsUsed=glideTime=0;glideActive=false;P.x=0;P.z=10;P.yaw=P.pitch=0;camera.position.set(0,1.7,10);camera.rotation.set(0,0,0);
   $('lv').textContent='Home';$('wv').textContent='Safe';$('dr').textContent=0;syncHud();save();
 }
 function upgrades(back){
@@ -943,18 +943,26 @@ function upgrades(back){
   btn('Close',back,'main');
 }
 function gatePos(a,b){const dx=b.x-a.x,dy=b.y-a.y,l=Math.max(Math.abs(dx),Math.abs(dy))||1;return{x:dx/l*39,z:dy/l*39}}
-function label(t){
+function label(t,color='#fff4dc'){
   const c=document.createElement('canvas');c.width=512;c.height=96;const x=c.getContext('2d');
-  x.font='bold 54px sans-serif';x.textAlign='center';x.lineWidth=8;x.strokeStyle='#1b1d3d';x.fillStyle='#fff4dc';x.strokeText(t,256,64);x.fillText(t,256,64);
+  x.font='bold 54px sans-serif';x.textAlign='center';x.lineWidth=8;x.strokeStyle='#1b1d3d';x.fillStyle=color;x.strokeText(t,256,64);x.fillText(t,256,64);
   const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c),fog:false,transparent:true}));sp.scale.set(8,1.5,1);sp.position.y=5.6;return sp;
 }
 function spawnGates(){
   gates.splice(0).forEach(g=>scene.remove(g.m));
+  const active=areaClear;
   nbrs(LV).forEach(n=>{
     const p=gatePos(LV,n),m=new THREE.Group();
-    const ring=new THREE.Mesh(new THREE.TorusGeometry(2.4,.25,8,24),new THREE.MeshBasicMaterial({color:isDone(n)?0xffd23f:0x46e0d0,fog:false}));
-    ring.position.y=2.6;m.add(ring,label(n.name+(isDone(n)?'':' (new)')));
-    m.position.set(p.x,0,p.z);m.rotation.y=Math.atan2(-p.x,-p.z);scene.add(m);gates.push({x:p.x,z:p.z,node:n,m});
+    const outer=new THREE.Shape(),inner=new THREE.Path();
+    for(let i=0;i<6;i++){const a=i*Math.PI/3,x=Math.cos(a)*2.5,y=Math.sin(a)*2.5;if(i===0)outer.moveTo(x,y);else outer.lineTo(x,y)}
+    outer.closePath();
+    for(let i=5;i>=0;i--){const a=i*Math.PI/3,x=Math.cos(a)*2.15,y=Math.sin(a)*2.15;if(i===5)inner.moveTo(x,y);else inner.lineTo(x,y)}
+    inner.closePath();outer.holes.push(inner);
+    const color=active?(isDone(n)?0xffd23f:0x46e0d0):0x7b858c;
+    const labelColor=active?(isDone(n)?'#ffd23f':'#46e0d0'):'#7b858c';
+    const ring=new THREE.Mesh(new THREE.ShapeGeometry(outer),new THREE.MeshBasicMaterial({color,fog:false,side:THREE.DoubleSide}));
+    ring.position.y=2.6;m.add(ring,label(n.name+(isDone(n)?'':' (new)'),labelColor));
+    m.position.set(p.x,0,p.z);m.rotation.y=Math.atan2(-p.x,-p.z);scene.add(m);gates.push({x:p.x,z:p.z,node:n,m,active});
   });
 }
 function enterArea(n,from,force){
@@ -963,11 +971,12 @@ function enterArea(n,from,force){
   buildCrates(n.crates,nbrs(n).map(m=>gatePos(n,m)));
   scene.background.setHex(n.sky);scene.fog.color.setHex(n.fog);
   enemies.splice(0).forEach(m=>scene.remove(m));leavePickups();boostT=0;lastDamageAt=gameTime;lastSpectreHeal=gameTime;
-  Store.data.stats.runs++;jumpHeight=jumpVelocity=0;jumpsUsed=glideTime=0;P.x=P.z=0;P.yaw=P.pitch=0;
+  Store.data.stats.runs++;jumpHeight=jumpVelocity=0;jumpsUsed=glideTime=0;glideActive=false;P.x=P.z=0;P.yaw=P.pitch=0;
   if(from){const g=gatePos(n,from);P.x=g.x*.8;P.z=g.z*.8;P.yaw=Math.atan2(g.x,g.z)}
   else{setHp(maxHp());score=0;$('sc').textContent=0}
   wave=0;$('lv').textContent=n.name;save();
-  if(areaClear){spawnGates();$('wv').textContent='Clear'}else spawnWave();
+  spawnGates();
+  if(areaClear)$('wv').textContent='Clear';else spawnWave();
   resume();
 }
 function resume(){state='play';ov.style.display='none';$('pb').classList.add('on');$('quick').classList.add('on');refreshQuick();if(!isTouch)renderer.domElement.requestPointerLock()}
@@ -1013,23 +1022,22 @@ function tick(){
     const jumpItem=ABILITIES[EQ.jumpType];
     if(jumpPressed){
       const maxJumps=jumpItem?.jumps||1;
-      if(jumpItem&&(jumpHeight===0||jumpsUsed<maxJumps)){
-        if(jumpHeight===0){jumpsUsed=0;glideTime=0}
-        jumpsUsed++;jumpVelocity=jumpItem.jumpVelocity;
-      }else if(!jumpItem)toast('No jump type equipped');
+      if(!jumpItem)toast('No jump type equipped');
+      else if(jumpHeight===0){jumpsUsed=1;glideTime=0;glideActive=false;jumpVelocity=jumpItem.jumpVelocity}
+      else if(jumpItem.glideDecay&&!glideActive){glideActive=true;glideTime=0}
+      else if(!jumpItem.glideDecay&&jumpsUsed<maxJumps){jumpsUsed++;jumpVelocity=jumpItem.jumpVelocity}
       jumpPressed=false;
     }
     if(jumpHeight>0||jumpVelocity>0){
-      if(jumpItem?.glideDecay&&jumpHeight>0&&jumpVelocity<=0){
+      if(glideActive&&jumpHeight>0&&jumpVelocity<=0){
         glideTime+=dt;
         const fallSpeed=Math.max(jumpItem.minGlideFallSpeed,jumpItem.maxGlideFallSpeed/(1+Math.log1p(glideTime*jumpItem.glideDecay)));
         jumpVelocity=-fallSpeed;
       }else{
         jumpVelocity-=23*dt;
-        if(jumpVelocity<0&&jumpItem?.glideDecay)glideTime=0;
       }
       jumpHeight=Math.max(0,jumpHeight+jumpVelocity*dt);
-      if(jumpHeight===0){jumpVelocity=0;jumpsUsed=0;glideTime=0}
+      if(jumpHeight===0){jumpVelocity=0;jumpsUsed=0;glideTime=0;glideActive=false}
     }
     camera.position.set(P.x,1.7+jumpHeight+Math.sin(bob)*.04*(l>0),P.z);
     camera.rotation.set(P.pitch,P.yaw,0);
@@ -1114,7 +1122,7 @@ function tick(){
       let on=null;for(const d of HOME_PADS)if(Math.hypot(P.x-d.x,P.z-d.z)<2.2)on=d;
       if(!on)padHot=null;else if(on!==padHot){padHot=on;state='paused';release();on.act()}
     }
-    for(const g of gates)if(Math.hypot(P.x-g.x,P.z-g.z)<2.8){enterArea(g.node,LV);break}
+    for(const g of gates)if(g.active&&Math.hypot(P.x-g.x,P.z-g.z)<2.8){enterArea(g.node,LV);break}
     $('dr').textContent=enemies.length;
     if(state==='play'&&!areaClear&&!enemies.length){if(wave>=LV.waves)complete();else spawnWave()}
   }
@@ -1133,7 +1141,7 @@ tick();
 enterHome();state='play';ov.style.display='none';
 $('pb').classList.add('on');$('quick').classList.add('on');refreshQuick();
 document.addEventListener('pointerdown',unlockAudio);
-toast(isTouch?'Stick to move, drag to look, JUMP leaps, AIM zooms. II opens the menu.':'Click to look around. Space jumps; hold right mouse to aim. Esc opens the menu.',5000);
+toast(isTouch?'Stick to move, drag to look, JUMP leaps or activates Glide in midair. AIM zooms.':'Click to look around. Space jumps or activates Glide in midair; hold right mouse to aim. Esc opens the menu.',5000);
 })();
 </script>
 </body>
