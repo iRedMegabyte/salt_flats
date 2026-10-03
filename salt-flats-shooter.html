@@ -11,15 +11,14 @@
 html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font-family:"Trebuchet MS","Segoe UI",system-ui,sans-serif;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
 canvas{display:block;position:fixed;inset:0;width:100%;height:100%}
 #hud{position:fixed;inset:0;pointer-events:none;font-weight:700}
-#stats{position:absolute;left:14px;top:calc(env(safe-area-inset-top,0px) + 12px);font-size:18px;line-height:1.5;text-shadow:0 2px 0 #0006}
-#hp{width:160px;height:10px;background:#0006;border-radius:5px;overflow:hidden}
+#hp{position:absolute;left:50%;top:calc(env(safe-area-inset-top,0px) + 14px);transform:translateX(-50%);width:min(440px,calc(100vw - 36px));height:24px;background:#0009;border:2px solid #fff8;border-radius:6px;overflow:hidden;box-shadow:0 2px 8px #0008}
 #hpf{height:100%;width:100%;background:var(--cool);transition:width .15s}
 #cross{position:absolute;left:50%;top:50%;width:22px;height:22px;margin:-11px;border:2px solid var(--ink);border-radius:50%;opacity:.8}
 #cross.aim{width:12px;height:12px;margin:-6px;border-width:1px;opacity:1}
 #cross.hit{border-color:var(--hot);transform:scale(1.5)}
 #cross{transition:transform .08s,border-color .08s}
 #vig{position:absolute;inset:0;background:radial-gradient(transparent 45%,var(--bad));opacity:0;transition:opacity .25s}
-#wave{position:absolute;top:calc(env(safe-area-inset-top,0px) + 12px);right:14px;font-size:18px;text-align:right;text-shadow:0 2px 0 #0006}
+#hudData{display:none}
 #ov{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#1b1d3dd9;text-align:center;padding:24px;z-index:5}
 #ov h1{margin:0;font-size:clamp(30px,7vw,56px);letter-spacing:-.02em;color:var(--hot)}
 #ov p{margin:0;max-width:34em;line-height:1.5;opacity:.9}
@@ -99,10 +98,10 @@ canvas{display:block;position:fixed;inset:0;width:100%;height:100%}
 </head>
 <body>
 <div id="hud">
-  <div id="stats"><div>Score <span id="sc">0</span></div><div>Scrap <span id="scr">0</span></div><div id="hp"><div id="hpf"></div></div></div>
-  <div id="wave"><span id="lv"></span><br>Wave <span id="wv">1</span><br>Drones <span id="dr">0</span></div>
+  <div id="hp" role="meter" aria-label="Health" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"><div id="hpf"></div></div>
   <div id="quick"><button id="qm"></button><button id="qb"></button><button id="qi"></button></div><div id="toast"></div><div id="cross"></div><div id="vig"></div>
 </div>
+<div id="hudData" aria-hidden="true"><span id="sc">0</span><span id="scr">0</span><span id="lv"></span><span id="wv">1</span><span id="dr">0</span></div>
 <div id="touch"><div id="stick"><div id="knob"></div></div><div id="fire">FIRE</div><button id="jump" type="button" aria-label="Jump">JUMP</button><button id="aim" type="button" aria-label="Aim down sights" aria-pressed="false">AIM</button></div>
 <button id="pb" aria-label="Pause">II</button>
 <div id="ov"><h1 id="t"></h1><p id="m"></p><div id="menu"></div></div>
@@ -554,7 +553,7 @@ const maxOf=id=>(ITEMS[id].max ?? ((ITEMS[id].slot && ITEMS[id].slot!=='item')?1
 const bonus=k=>ARMOR_SLOTS.reduce((t,s)=>t+((ITEMS[EQ.armor[s]]||{})[k]||0),0);
 const maxHp=()=>100+bonus('hp'),armorRed=()=>{const a=bonus('armor');return a/(a+40)};
 const wk=c=>Object.keys(B).find(k=>B[k]===c)||'';
-function hudHp(){$('hpf').style.width=Math.max(0,P.hp/maxHp()*100)+'%'}
+function hudHp(){const max=maxHp(),hp=Math.max(0,Math.min(max,P.hp));$('hpf').style.width=hp/max*100+'%';$('hp').setAttribute('aria-valuemax',max);$('hp').setAttribute('aria-valuenow',Math.ceil(hp))}
 function hudScrap(){$('scr').textContent=WAL.scrap.toLocaleString()}
 function setHp(v){P.hp=Math.min(maxHp(),v);hudHp()}
 function addScrap(n){WAL.scrap=Math.min(SCRAP_CAP,WAL.scrap+n);hudScrap()}
