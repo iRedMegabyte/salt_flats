@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>salt_flats</title>
+<title>Salt Flats Drone Defense</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Cpath%20fill%3D%22%2346e0d0%22%20d%3D%22M32%204%2056%2018v28L32%2060%208%2046V18z%22%2F%3E%3C%2Fsvg%3E">
 <style>
 :root{--bg:#1b1d3d;--ink:#fff4dc;--hot:#ffd23f;--cool:#46e0d0;--bad:#ff3d6e;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
@@ -109,6 +109,10 @@ canvas{display:block;position:fixed;inset:0;width:100%;height:100%}
 #menu.wide{width:min(560px,100%)}
 #menu textarea{font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;width:100%;box-sizing:border-box;min-height:150px;background:#0006;color:var(--ink);border:1px solid #fff5;border-radius:8px;padding:8px;resize:vertical}
 #menu textarea:focus-visible{outline:3px solid var(--cool);outline-offset:2px}
+#menu button.danger{border-color:var(--bad);color:var(--bad)}
+#menu button.danger:disabled{border-color:#fff5;color:inherit}
+#menu input[type=text]{font:inherit;font-size:18px;width:100%;box-sizing:border-box;background:#0006;color:var(--ink);border:2px solid var(--bad);border-radius:10px;padding:12px 14px;text-align:center;letter-spacing:.1em}
+#menu input[type=text]:focus-visible{outline:3px solid var(--cool);outline-offset:2px}
 </style>
 </head>
 <body>
@@ -957,7 +961,7 @@ function options(back){
   btn('Developer options: '+(OPT.dev?'On':'Off'),()=>{OPT.dev=!OPT.dev;syncDev();save();options(back)});
   btn('Controls',()=>controls(back));
   btn('Save data: export or import',()=>saveMenu(back));
-  btn('Reset all save data',()=>{Store.reset();applyOpts();syncHud();syncDev();options(back)});
+  btn('Reset all save data',()=>resetStage1(back),'danger');
   btn('Back',back);
 }
 // Compendium: in-game documentation generated from live game data
@@ -999,7 +1003,7 @@ ${tbl(['Slot','Item','Armor','Other bonus','Status'],ofKind(t=>ARMOR_SLOTS.inclu
 ${tbl(['Companion','Output','Every','Range','Rate','Status'],ofKind(t=>t.slot==='companion').map(k=>{const t=ITEMS[k];if(t.heal){return [t.name,Math.round(t.heal*100)+'% max HP',t.interval+'s',t.range+'m','5%/s after '+t.wait+'s safe',status(k)]}return [t.name,t.cdmg+' dmg',t.iv+'s',t.range,r1(t.cdmg/t.iv),status(k)]}))}
 <p>Companions are not affected by Overcharge. They drop from drones like other gear.</p>`],
 ['stats','Stats explained',()=>`${tbl(['Stat','Meaning'],[['Health','100 plus any max health bonuses. Medkits restore 35. Health refills when you arrive Home.'],['Armor','Total armor from equipped pieces, converted to damage reduction as described under Armor.'],['Move speed','6 walking and 9 sprinting, multiplied by any speed bonuses.'],['Weapon damage','Health removed from a drone per hit. Drones have 2 health.'],['Fire rate','Shots per second of your active weapon, doubled by Overcharge.'],['Overcharge','Lasts 8 seconds after use.'],['Companion','Damage and delay of your companion, if any.'],['Drones downed','Lifetime total across all runs.'],['Areas cleared','Areas you have cleared out of all areas in every world.'],['Scrap','Currency, capped at '+SCRAP_CAP.toLocaleString()+'.'],['Slots','Backpack slots in use. Each stack holds up to 999.']])}
-<h3>Saving</h3><p>Progress, options, bindings, inventory and equipment save automatically in this browser. Use Options, then Save data, to export your save as text or a file and import it on another device or browser. Reset all save data in Options clears everything.</p>`],
+<h3>Saving</h3><p>Progress, options, bindings, inventory and equipment save automatically in this browser. Use Options, then Save data, to export your save as text or a file and import it on another device or browser. Reset all save data in Options clears everything, and asks you twice first.</p>`],
 ['home','Home',()=>`<p>Home is a neutral zone and where every session starts. No drones appear, your weapon is holstered, and you heal fully on arrival. Returning home brings you back to safety.</p>
 <h3>Stations</h3><p>Stand next to a station and press ${keyName(B.use)} (or tap the prompt that appears) to use it.</p>${tbl(['Station','Use'],[['Map (cyan)','Opens the world map so you can travel to an area.'],['Upgrade bench (gold)','Spend scrap on upgrades. Nothing is for sale yet.'],['Compendium (violet)','Opens this in-game guide.'],...(OPT.dev?[['Dev pedestal (magenta)','Opens the developer menu.']]:[])])}`]
 ];
@@ -1031,11 +1035,11 @@ function parseSave(text){
   if(fnv(JSON.stringify(env.data))!==env.check&&!OPT.dev)return{error:'The save failed its integrity check. It may be incomplete or edited.'};
   try{return{data:Store.normalize(env.data)}}catch(e){return{error:'The save data is damaged.'}}
 }
-function applySave(n){
+function applySave(n,title='Save imported',msg='Your progress has been loaded and you are back at Home.'){
   pickups.splice(0).forEach(k=>scene.remove(k.m));
   Store.replace(n);sanitizeSave();sanitizeProgress();Store.save();
   LV=nodeById(PROG.at);wSel=0;god=false;applyOpts();enterHome();
-  screen('Save imported','Your progress has been loaded and you are back at Home.',resume);btn('Continue',resume,'main');
+  screen(title,msg,resume);btn('Continue',resume,'main');
 }
 const say=t=>{$('m').textContent=t};
 function textBox(value,readOnly){
@@ -1078,6 +1082,22 @@ function confirmImport(text,back){
   const n=r.data,num=v=>Math.max(0,Math.floor(+v||0));
   screen('Replace your save?','This save has '+Object.keys(n.progress.done||{}).length+' cleared areas, '+num(n.wallet.scrap).toLocaleString()+' scrap and '+num(n.stats.kills).toLocaleString()+' drones downed. It will replace your current progress and cannot be undone.',()=>importScreen(back));
   btn('Import and replace',()=>applySave(n),'main');btn('Cancel',()=>importScreen(back));
+}
+// Two-stage reset: a summary of what is lost (with a backup shortcut), then a typed confirmation
+function resetStage1(back){
+  screen('Reset all save data?','This permanently erases '+Object.keys(PROG.done).length+' cleared areas, '+WAL.scrap.toLocaleString()+' scrap, '+Store.data.stats.kills.toLocaleString()+' drones downed, your inventory, equipment, abilities, options and key bindings. There is no undo.',()=>options(back));
+  btn('Cancel, keep my save',()=>options(back),'main');
+  btn('Export a backup first',()=>exportScreen(back));
+  btn('I understand, continue',()=>resetStage2(back),'danger');
+}
+function resetStage2(back){
+  screen('Final warning','Type RESET below to confirm. Your save will be erased immediately and cannot be recovered.',()=>resetStage1(back));
+  const i=document.createElement('input');i.type='text';i.autocomplete='off';i.spellcheck=false;i.placeholder='Type RESET';i.setAttribute('aria-label','Type RESET to confirm');
+  menu.appendChild(i);
+  btn('Cancel, keep my save',()=>options(back),'main');
+  const go=btn('Erase everything',()=>{if(i.value.trim().toUpperCase()==='RESET')applySave(Store.normalize(Store.defaults()),'Save reset','Everything was erased and you are back at Home with a fresh start.')},'danger',true);
+  i.oninput=()=>{go.disabled=i.value.trim().toUpperCase()!=='RESET'};
+  i.focus();
 }
 function exitGame(){state='menu';release();screen('Game closed','Thanks for playing. Your progress is saved.');btn('Reopen',goHome,'main');try{window.close()}catch(e){}}
 // Home: a neutral, weapon-free hub. Pads open the map and the upgrade bench.
