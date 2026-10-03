@@ -402,10 +402,10 @@ document.addEventListener('touchend',tEnd);document.addEventListener('touchcance
 let boostT=0,wSel=0;const pickups=[];
 const SCRAP_CAP=100000000,ARMOR_SLOTS=['head','chest','arms','waist','legs','feet','artifact'];
 const SLOTLBL={head:'Head',chest:'Chest',arms:'Arms',waist:'Waist',legs:'Legs',feet:'Feet',artifact:'Artifact'};
-// Stackable items cap at 999 by default; anything with a `slot` is equipment and does not stack.
+// Generic item-slot gear can stack in the backpack, while true equipment (weapons, armor, companions) remains single-instance.
 const ITEMS={
- medkit:{name:'Medkit',slot:'item',desc:'Restores 35 health.',use(){if(P.hp>=maxHp()){toast('Health is full');return false}setHp(P.hp+35);return true}},
- boost:{name:'Overcharge',slot:'item',desc:'Doubles fire rate for 8s.',use(){boostT=8;toast('Overcharge active');return true}},
+ medkit:{name:'Medkit',slot:'item',max:999,desc:'Restores 35 health.',use(){if(P.hp>=maxHp()){toast('Health is full');return false}setHp(P.hp+35);return true}},
+ boost:{name:'Overcharge',slot:'item',max:999,desc:'Doubles fire rate for 8s.',use(){boostT=8;toast('Overcharge active');return true}},
  blaster:{name:'Pulse Blaster',slot:'weapon',dmg:1,rate:.17,desc:'Reliable sidearm.'},
  smg:{name:'Rapid SMG',slot:'weapon',dmg:.6,rate:.08,desc:'Fast and light.'},
  rifle:{name:'Heavy Rifle',slot:'weapon',dmg:2,rate:.38,desc:'One-shot drones.'},
@@ -419,7 +419,7 @@ const ITEMS={
 const GEAR=Object.keys(ITEMS).filter(k=>ITEMS[k].slot&&k!=='blaster');
 const DROP={chance:.45,scrap:.55,medkit:.22,boost:.15}; // gear gets whatever is left
 const PCOL={medkit:0x46e0d0,boost:0xff3d6e,scrap:0xcfcfcf};
-const maxOf=id=>ITEMS[id].slot?1:(ITEMS[id].max||999);
+const maxOf=id=>(ITEMS[id].max ?? ((ITEMS[id].slot && ITEMS[id].slot!=='item')?1:999));
 const bonus=k=>ARMOR_SLOTS.reduce((t,s)=>t+((ITEMS[EQ.armor[s]]||{})[k]||0),0);
 const maxHp=()=>100+bonus('hp'),armorRed=()=>{const a=bonus('armor');return a/(a+40)};
 const wk=c=>Object.keys(B).find(k=>B[k]===c)||'';
