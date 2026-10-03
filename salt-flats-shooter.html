@@ -118,14 +118,14 @@ if(isTouch)document.body.classList.add('touch');
 // Persistent storage: one versioned save object behind a swappable adapter
 // (localStorage here; replace `adapter` to target a server, file, or native store)
 const Store=(()=>{
-  const KEY='sfdd.save',VER=4,mem={};
+  const KEY='sfdd.save',VER=5,mem={};
   const adapter={get(k){try{return localStorage.getItem(k)}catch(e){return mem[k]??null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){mem[k]=v}}};
   const defaults=()=>({v:VER,
     options:{sens:1,vol:.7,fov:75,invert:false},
     keys:{forward:'KeyW',back:'KeyS',left:'KeyA',right:'KeyD',sprint:'ShiftLeft',jump:'Space',pause:'KeyP',inventory:'KeyI',map:'KeyM',use:'KeyE',item1:'KeyQ',item2:'KeyR',w1:'Digit1',w2:'Digit2',w3:'Digit3',compendium:'KeyC'},
     progress:{at:'landing',done:{}},
     inventory:{cap:24,slots:[{id:'medkit',n:1}]},
-    abilities:{items:['basicJump']},
+    abilities:{items:['basicJump','doubleJump','glide']},
     equipment:{weapons:['blaster',null,null],itemSlots:[null,null],jumpType:'basicJump',armor:{head:null,chest:null,arms:null,waist:null,legs:null,feet:null,artifact:null},companion:null},
     wallet:{scrap:0},
     stats:{kills:0,runs:0},upgrades:{}});
@@ -155,6 +155,11 @@ const Store=(()=>{
             d.inventory.slots=d.inventory.slots.filter(s=>s.id!=='basicJump');
             d.migratedAbilities=true;
           }
+          d.migratedAbilities=true;
+        }
+        if(oldVersion<5){
+          d.abilities.items=d.abilities.items||[];
+          for(const id of ['basicJump','doubleJump','glide'])if(!d.abilities.items.includes(id))d.abilities.items.push(id);
           d.migratedAbilities=true;
         }
       }
@@ -226,7 +231,7 @@ const flash=new THREE.PointLight(0xffd23f,0,8);flash.position.set(0,0,-1);camera
 
 // State
 const P={x:0,z:0,yaw:0,pitch:0,hp:100};
-let jumpHeight=0,jumpVelocity=0,jumpPressed=false;
+let jumpHeight=0,jumpVelocity=0,jumpPressed=false,jumpsUsed=0,glideTime=0;
 let state='menu',score=0,wave=0,fireCd=0,flashT=0,hurtCd=0,bob=0;
 let gameTime=0,lastDamageAt=0,lastSpectreHeal=0;
 const enemies=[],bits=[],projectiles=[];
@@ -478,7 +483,9 @@ const ITEMS={
 const DEFAULT_SCRAP_VALUE=5;
 for(const item of Object.values(ITEMS))item.scrap??=DEFAULT_SCRAP_VALUE;
 const ABILITIES={
- basicJump:{name:'Basic Jump',jumpVelocity:8.5,desc:'A standard grounded jump.'}
+ basicJump:{name:'Basic Jump',jumpVelocity:8.5,jumps:1,desc:'A standard grounded jump.'},
+ doubleJump:{name:'Double Jump',jumpVelocity:8.5,jumps:2,desc:'Jump a second time while airborne.'},
+ glide:{name:'Glide',jumpVelocity:8.5,jumps:1,glideDecay:1.6,maxGlideFallSpeed:3.2,minGlideFallSpeed:.75,desc:'Automatically glides on descent; fall speed decays logarithmically.'}
 };
 let gunModelId;
 const WEAPON_ARCHETYPES={
@@ -693,6 +700,8 @@ function info(id){
   if(t.hp)p.push('Max health +'+t.hp);if(t.speed)p.push('Speed +'+Math.round(t.speed*100)+'%');if(t.cdmg)p.push('Assist '+t.cdmg+' dmg every '+t.iv+'s');
   if(t.heal)p.push('Heals '+Math.round(t.heal*100)+'% max HP every '+t.interval+'s after '+t.wait+'s of no damage');
   if(t.jumpVelocity)p.push('Jump velocity '+t.jumpVelocity);
+  if(t.jumps>1)p.push((t.jumps-1)+' extra midair jump');
+  if(t.glideDecay)p.push('Automatic glide with logarithmic fall-speed decay');
   return (t.desc?t.desc+' ':'')+p.join(', ');
 }
 function cell(a,k,label,id,extra,sel){const item=ITEMS[id]||ABILITIES[id];return `<button class="cell ${id?'':'empty'} ${sel?'sel':''}" data-a="${a}" data-k="${k}"><small>${label}</small>${item?item.name:'Empty'}${extra||''}</button>`}
@@ -924,7 +933,7 @@ function enterHome(){
   gates.splice(0).forEach(g=>scene.remove(g.m));buildCrates(0);boxes.push(...HOME_BOXES);
   scene.background.setHex(0x2e3a4a);scene.fog.color.setHex(0x9a8a7a);
   enemies.splice(0).forEach(m=>scene.remove(m));leavePickups();boostT=0;lastDamageAt=gameTime;lastSpectreHeal=gameTime;
-  setHp(maxHp());jumpHeight=jumpVelocity=0;P.x=0;P.z=10;P.yaw=P.pitch=0;camera.position.set(0,1.7,10);camera.rotation.set(0,0,0);
+  setHp(maxHp());jumpHeight=jumpVelocity=0;jumpsUsed=glideTime=0;P.x=0;P.z=10;P.yaw=P.pitch=0;camera.position.set(0,1.7,10);camera.rotation.set(0,0,0);
   $('lv').textContent='Home';$('wv').textContent='Safe';$('dr').textContent=0;syncHud();save();
 }
 function upgrades(back){
@@ -954,7 +963,7 @@ function enterArea(n,from,force){
   buildCrates(n.crates,nbrs(n).map(m=>gatePos(n,m)));
   scene.background.setHex(n.sky);scene.fog.color.setHex(n.fog);
   enemies.splice(0).forEach(m=>scene.remove(m));leavePickups();boostT=0;lastDamageAt=gameTime;lastSpectreHeal=gameTime;
-  Store.data.stats.runs++;jumpHeight=jumpVelocity=0;P.x=P.z=0;P.yaw=P.pitch=0;
+  Store.data.stats.runs++;jumpHeight=jumpVelocity=0;jumpsUsed=glideTime=0;P.x=P.z=0;P.yaw=P.pitch=0;
   if(from){const g=gatePos(n,from);P.x=g.x*.8;P.z=g.z*.8;P.yaw=Math.atan2(g.x,g.z)}
   else{setHp(maxHp());score=0;$('sc').textContent=0}
   wave=0;$('lv').textContent=n.name;save();
@@ -1002,8 +1011,26 @@ function tick(){
     P.x+=(-sy*f+cy*s)*sp;P.z+=(-cy*f-sy*s)*sp;resolve(P,.5);
     if(l>0)bob+=dt*10;
     const jumpItem=ABILITIES[EQ.jumpType];
-    if(jumpPressed){if(jumpItem&&jumpHeight===0)jumpVelocity=jumpItem.jumpVelocity;else if(!jumpItem)toast('No jump type equipped');jumpPressed=false}
-    if(jumpHeight>0||jumpVelocity>0){jumpVelocity-=23*dt;jumpHeight=Math.max(0,jumpHeight+jumpVelocity*dt);if(jumpHeight===0)jumpVelocity=0}
+    if(jumpPressed){
+      const maxJumps=jumpItem?.jumps||1;
+      if(jumpItem&&(jumpHeight===0||jumpsUsed<maxJumps)){
+        if(jumpHeight===0){jumpsUsed=0;glideTime=0}
+        jumpsUsed++;jumpVelocity=jumpItem.jumpVelocity;
+      }else if(!jumpItem)toast('No jump type equipped');
+      jumpPressed=false;
+    }
+    if(jumpHeight>0||jumpVelocity>0){
+      if(jumpItem?.glideDecay&&jumpHeight>0&&jumpVelocity<=0){
+        glideTime+=dt;
+        const fallSpeed=Math.max(jumpItem.minGlideFallSpeed,jumpItem.maxGlideFallSpeed/(1+Math.log1p(glideTime*jumpItem.glideDecay)));
+        jumpVelocity=-fallSpeed;
+      }else{
+        jumpVelocity-=23*dt;
+        if(jumpVelocity<0&&jumpItem?.glideDecay)glideTime=0;
+      }
+      jumpHeight=Math.max(0,jumpHeight+jumpVelocity*dt);
+      if(jumpHeight===0){jumpVelocity=0;jumpsUsed=0;glideTime=0}
+    }
     camera.position.set(P.x,1.7+jumpHeight+Math.sin(bob)*.04*(l>0),P.z);
     camera.rotation.set(P.pitch,P.yaw,0);
     // weapon
