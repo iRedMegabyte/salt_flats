@@ -115,10 +115,10 @@ const Store=(()=>{
   const adapter={get(k){try{return localStorage.getItem(k)}catch(e){return mem[k]??null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){mem[k]=v}}};
   const defaults=()=>({v:VER,
     options:{sens:1,vol:.7,fov:75,invert:false},
-    keys:{forward:'KeyW',back:'KeyS',left:'KeyA',right:'KeyD',sprint:'ShiftLeft',pause:'KeyP',inventory:'KeyI',map:'KeyM',w1:'Digit1',w2:'Digit2',w3:'Digit3',compendium:'KeyC',medkit:'KeyQ',boost:'KeyE'},
+    keys:{forward:'KeyW',back:'KeyS',left:'KeyA',right:'KeyD',sprint:'ShiftLeft',pause:'KeyP',inventory:'KeyI',map:'KeyM',use:'KeyE',item1:'KeyQ',item2:'KeyR',w1:'Digit1',w2:'Digit2',w3:'Digit3',compendium:'KeyC'},
     progress:{at:'landing',done:{}},
     inventory:{cap:24,slots:[{id:'medkit',n:1}]},
-    equipment:{weapons:['blaster',null,null],armor:{head:null,chest:null,arms:null,waist:null,legs:null,feet:null,artifact:null},companion:null},
+    equipment:{weapons:['blaster',null,null],itemSlots:[null,null],armor:{head:null,chest:null,arms:null,waist:null,legs:null,feet:null,artifact:null},companion:null},
     wallet:{scrap:0},
     stats:{kills:0,runs:0},upgrades:{}});
   const isObj=x=>x&&typeof x==='object'&&!Array.isArray(x);
@@ -229,10 +229,10 @@ const ENEMY_TYPES={
     score:14,
     attack:'ranged',
     projectileDamage:24,
-    projectileSpeed:7,
+    projectileSpeed:14,
     projectileCooldown:1.5,
-    keepDistance:5.5,
-    shootRange:20
+    keepDistance:8,
+    shootRange:64
   },
   barons:{
     name:'Barons',
@@ -404,8 +404,8 @@ const SCRAP_CAP=100000000,ARMOR_SLOTS=['head','chest','arms','waist','legs','fee
 const SLOTLBL={head:'Head',chest:'Chest',arms:'Arms',waist:'Waist',legs:'Legs',feet:'Feet',artifact:'Artifact'};
 // Stackable items cap at 999 by default; anything with a `slot` is equipment and does not stack.
 const ITEMS={
- medkit:{name:'Medkit',desc:'Restores 35 health.',use(){if(P.hp>=maxHp()){toast('Health is full');return false}setHp(P.hp+35);return true}},
- boost:{name:'Overcharge',desc:'Doubles fire rate for 8s.',use(){boostT=8;toast('Overcharge active');return true}},
+ medkit:{name:'Medkit',slot:'item',desc:'Restores 35 health.',use(){if(P.hp>=maxHp()){toast('Health is full');return false}setHp(P.hp+35);return true}},
+ boost:{name:'Overcharge',slot:'item',desc:'Doubles fire rate for 8s.',use(){boostT=8;toast('Overcharge active');return true}},
  blaster:{name:'Pulse Blaster',slot:'weapon',dmg:1,rate:.17,desc:'Reliable sidearm.'},
  smg:{name:'Rapid SMG',slot:'weapon',dmg:.6,rate:.08,desc:'Fast and light.'},
  rifle:{name:'Heavy Rifle',slot:'weapon',dmg:2,rate:.38,desc:'One-shot drones.'},
@@ -497,17 +497,31 @@ function companionTick(dt){
   if(best){compCd=c.iv;hurt(best,c.cdmg);beep(900,.06,'triangle',.03)}
 }
 function keyName(c){return c.replace(/^(Key|Digit)/,'').replace(/(Left|Right)$/,m=>' '+m[0])}
+const ITEM_BINDINGS={item1:0,item2:1};
+function useBoundItem(name){
+  const index=ITEM_BINDINGS[name];
+  if(index===undefined)return false;
+  const id=EQ.itemSlots[index];
+  if(!id){toast('Empty item slot');return false;}
+  const it=ITEMS[id];
+  if(!it||!it.use)return false;
+  const ok=it.use();
+  if(ok){EQ.itemSlots[index]=null;save();syncHud();renderInv();}
+  return ok;
+}
 function refreshQuick(){
-  $('qm').textContent='Medkit x'+count('medkit')+' ['+keyName(B.medkit)+']';
-  $('qb').textContent='Overcharge x'+count('boost')+' ['+keyName(B.boost)+']';
+  const slot1=EQ.itemSlots[0]?ITEMS[EQ.itemSlots[0]].name:'Empty';
+  const slot2=EQ.itemSlots[1]?ITEMS[EQ.itemSlots[1]].name:'Empty';
+  $('qm').textContent='Item 1: '+slot1+' ['+keyName(B.item1)+']';
+  $('qb').textContent='Item 2: '+slot2+' ['+keyName(B.item2)+']';
   $('qi').textContent='Inventory ['+keyName(B.inventory)+']';
 }
 function syncHud(){hudScrap();hudHp();refreshCompanion();refreshQuick()}
 let tt;function toast(m,ms){const e=$('toast');e.textContent=m;e.style.opacity=1;clearTimeout(tt);tt=setTimeout(()=>e.style.opacity=0,ms||1600)}
-$('qm').onclick=()=>useItem('medkit');$('qb').onclick=()=>useItem('boost');$('qi').onclick=()=>inventory(resume);
+$('qm').onclick=()=>useBoundItem('item1');$('qb').onclick=()=>useBoundItem('item2');$('qi').onclick=()=>inventory(resume);
 
 // Key rebinding
-const ACTIONS=[['forward','Move forward'],['back','Move back'],['left','Strafe left'],['right','Strafe right'],['sprint','Sprint'],['pause','Pause'],['inventory','Inventory'],['map','Open map'],['w1','Weapon 1'],['w2','Weapon 2'],['w3','Weapon 3'],['compendium','Compendium'],['medkit','Use medkit'],['boost','Use overcharge']];
+const ACTIONS=[['forward','Move forward'],['back','Move back'],['left','Strafe left'],['right','Strafe right'],['sprint','Sprint'],['pause','Pause'],['inventory','Inventory'],['map','Open map'],['use','Use'],['item1','Item 1'],['item2','Item 2'],['w1','Weapon 1'],['w2','Weapon 2'],['w3','Weapon 3'],['compendium','Compendium']];
 let rebind=null,mapOpen=false;
 function onKey(e){
   if(rebind){
@@ -523,10 +537,11 @@ function onKey(e){
   if(e.code==='Escape'||e.code===B.pause)pause();
   else if(e.code===B.inventory)inventory(resume);
   else if(e.code===B.compendium)compendium(resume);
+  else if(e.code===B.use){toast('Use: interact with nearby world objects');}
   else if(/^w[123]$/.test(wk(e.code))){wSel=+wk(e.code)[1]-1;toast('Weapon '+(wSel+1)+': '+(ITEMS[EQ.weapons[wSel]]?ITEMS[EQ.weapons[wSel]].name:'empty'))}
   else if(e.code===B.map){state='paused';release();worldMap(null,null,resume)}
-  else if(e.code===B.medkit)useItem('medkit');
-  else if(e.code===B.boost)useItem('boost');
+  else if(e.code===B.item1)useBoundItem('item1');
+  else if(e.code===B.item2)useBoundItem('item2');
 }
 function controls(back){
   screen('Controls','Pick an action, then press the new key. Esc cancels. Mouse click always fires.');
@@ -540,9 +555,9 @@ function controls(back){
 // Dedicated inventory menu: vitals, stats, equipment, backpack
 const invEl=$('inv');let invSel=null,invBack=null;
 const invOpen=()=>invEl.classList.contains('on');
-const refOf=k=>k[0]==='w'?['w',+k[1]]:k[0]==='a'?['a',k.slice(2)]:['c'];
-const refSlot=r=>r[0]==='w'?EQ.weapons[r[1]]:r[0]==='a'?EQ.armor[r[1]]:EQ.companion;
-const setRef=(r,id)=>{if(r[0]==='w')EQ.weapons[r[1]]=id;else if(r[0]==='a')EQ.armor[r[1]]=id;else EQ.companion=id};
+const refOf=k=>k[0]==='w'?['w',+k[1]]:k[0]==='a'?['a',k.slice(2)]:k[0]==='i'?['i',+k.slice(1)]:['c'];
+const refSlot=r=>r[0]==='w'?EQ.weapons[r[1]]:r[0]==='a'?EQ.armor[r[1]]:r[0]==='i'?EQ.itemSlots[r[1]]:EQ.companion;
+const setRef=(r,id)=>{if(r[0]==='w')EQ.weapons[r[1]]=id;else if(r[0]==='a')EQ.armor[r[1]]=id;else if(r[0]==='i')EQ.itemSlots[r[1]]=id;else EQ.companion=id};
 function info(id){
   const t=ITEMS[id],p=[];
   if(t.dmg)p.push('Damage '+t.dmg);if(t.rate)p.push((1/t.rate).toFixed(1)+' shots/s');if(t.armor)p.push('Armor +'+t.armor);
@@ -569,6 +584,7 @@ function renderInv(){
    <div class="st"><span>Areas cleared</span><b>${Object.keys(PROG.done).length} / ${NODES.length}</b></div></section>`;
   h+=`<section><h3>Weapons</h3><div class="grid">${EQ.weapons.map((x,i)=>cell('eq','w'+i,'Weapon '+(i+1)+(i===wSel?' (active)':''),x,'',sel('eq','w'+i))).join('')}</div>
    <h3 style="margin-top:12px">Companion</h3><div class="grid">${cell('eq','c','Companion',EQ.companion,'',sel('eq','c'))}</div></section>`;
+  h+=`<section><h3>Item slots</h3><div class="grid">${EQ.itemSlots.map((x,i)=>cell('eq','i'+i,'Item '+(i+1),x,'',sel('eq','i'+i))).join('')}</div></section>`;
   h+=`<section><h3>Armor</h3><div class="grid">${ARMOR_SLOTS.map(k=>cell('eq','a:'+k,SLOTLBL[k],EQ.armor[k],'',sel('eq','a:'+k))).join('')}</div></section>`;
   h+=`<section class="full"><h3>Backpack</h3><div class="grid">`;
   for(let i=0;i<INV.cap;i++){const s=INV.slots[i];h+=s?cell('bag',i,'x'+s.n,s.id,'',sel('bag',i)):`<button class="cell empty" disabled><small>&nbsp;</small>Empty</button>`}
@@ -596,10 +612,13 @@ invEl.onclick=e=>{
   const i=invSel&&+invSel.k;
   if(a==='equip'){
     const s=INV.slots[i],it=ITEMS[s.id],id=s.id;
-    let r;if(it.slot==='weapon'){const n=EQ.weapons.indexOf(null);r=['w',n<0?wSel:n]}else r=it.slot==='companion'?['c']:['a',it.slot];
+    let r;
+    if(it.slot==='weapon'){const n=EQ.weapons.indexOf(null);r=['w',n<0?wSel:n]}
+    else if(it.slot==='item'){const n=EQ.itemSlots.indexOf(null);if(n<0){toast('No free item slot');return}r=['i',n]}
+    else r=it.slot==='companion'?['c']:['a',it.slot];
     const old=refSlot(r);if(--s.n<=0)INV.slots.splice(i,1);setRef(r,id);if(old)addItem(old,1);invSel=null;
   }else if(a==='unequip'){
-    const r=refOf(invSel.k),id=refSlot(r);if(addItem(id,1)>0)toast('Backpack full');else{setRef(r,null);invSel=null}
+    const r=refOf(invSel.k),id=refSlot(r);if(!id)return;if(addItem(id,1)>0)toast('Backpack full');else{setRef(r,null);invSel=null}
   }else if(a==='use')useItem(INV.slots[i].id);
   else if(a==='discard'){const s=INV.slots[i];if(--s.n<=0)INV.slots.splice(i,1)}
   else if(a==='active')wSel=+invSel.k[1];
@@ -719,7 +738,7 @@ ${tbl(['Companion','Output','Every','Range','Rate','Status'],ofKind(t=>t.slot===
 <p>Companions are not affected by Overcharge. They drop from drones like other gear.</p>`],
 ['stats','Stats explained',()=>`${tbl(['Stat','Meaning'],[['Health','100 plus any max health bonuses. Medkits restore 35. Health refills when you arrive Home.'],['Armor','Total armor from equipped pieces, converted to damage reduction as described under Armor.'],['Move speed','6 walking and 9 sprinting, multiplied by any speed bonuses.'],['Weapon damage','Health removed from a drone per hit. Drones have 2 health.'],['Fire rate','Shots per second of your active weapon, doubled by Overcharge.'],['Overcharge','Lasts 8 seconds after use.'],['Companion','Damage and delay of your companion, if any.'],['Drones downed','Lifetime total across all runs.'],['Areas cleared','Areas you have cleared out of all areas in every world.'],['Scrap','Currency, capped at '+SCRAP_CAP.toLocaleString()+'.'],['Slots','Backpack slots in use. Each stack holds up to 999.']])}
 <h3>Saving</h3><p>Progress, options, bindings, inventory and equipment save automatically in this browser. Reset all save data in Options clears everything.</p>`],
-['home','Home',()=>`<p>Home is a neutral zone and where every session starts. No drones appear, your weapon is holstered, and you heal fully on arrival. Quitting to the main menu returns you here.</p>
+['home','Home',()=>`<p>Home is a neutral zone and where every session starts. No drones appear, your weapon is holstered, and you heal fully on arrival. Returning home brings you back to safety.</p>
 <h3>Pads</h3>${tbl(['Pad','Use'],[['Map (cyan)','Opens the world map so you can travel to an area.'],['Upgrade bench (gold)','Spend scrap on upgrades. Nothing is for sale yet.']])}`]
 ];
 function renderComp(){
@@ -793,7 +812,7 @@ function resume(){state='play';ov.style.display='none';$('pb').classList.add('on
 function pause(){
   state='paused';release();screen('Paused',inHome?'Home. Scrap: '+WAL.scrap+'.':LV.name+', '+LV.w.name+'. Score '+score+'.');
   btn('Resume',resume,'main');btn('Map',()=>worldMap(null,null,pause));if(!inHome)btn('Restart area',()=>enterArea(LV,null,true));
-  btn('Inventory',()=>inventory(pause));btn('Compendium',()=>compendium(pause));btn('Options',()=>options(pause));btn('Quit to main menu',mainMenu);
+  btn('Inventory',()=>inventory(pause));btn('Compendium',()=>compendium(pause));btn('Options',()=>options(pause));btn('Return home',mainMenu);
 }
 function complete(){
   areaClear=true;const first=!isDone(LV);
@@ -809,7 +828,7 @@ function complete(){
 }
 function over(){
   state='over';release();screen('Overrun at '+LV.name,'Score '+score+'. The flats go quiet.');
-  btn('Retry area',()=>enterArea(LV,null,true),'main');btn('Open map',()=>worldMap(null,null,over));btn('Main menu',mainMenu);
+  btn('Retry area',()=>enterArea(LV,null,true),'main');btn('Open map',()=>worldMap(null,null,over));btn('Return home',mainMenu);
 }
 $('pb').addEventListener('click',()=>{if(state==='play')pause()});
 
@@ -850,7 +869,13 @@ function tick(){
         if(d<=type.shootRange && e.userData.cooldown<=0){
           e.userData.cooldown=type.projectileCooldown;
           const damage=type.projectileDamage || type.damage*4;
-          spawnProjectile(e.position.clone().add(new THREE.Vector3(0,0.2,0)), new THREE.Vector3(P.x,1.7,P.z), damage, type.color);
+          const projectileSpeed = type.projectileSpeed || 8;
+          const pOrigin=e.position.clone().add(new THREE.Vector3(0,0.2,0));
+          const pTarget=new THREE.Vector3(P.x,1.7,P.z);
+          const dir=new THREE.Vector3().subVectors(pTarget,pOrigin).normalize();
+          const velocity=dir.multiplyScalar(projectileSpeed);
+          const proj=new THREE.Mesh(new THREE.SphereGeometry(.18,10,10),new THREE.MeshBasicMaterial({color:type.color}));
+          proj.position.copy(pOrigin);scene.add(proj);projectiles.push({mesh:proj,velocity,damage,life:4});
           beep(430,.12,'square',.04);
         }
       }else{
