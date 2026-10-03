@@ -657,7 +657,7 @@ $('qm').onclick=()=>useBoundItem('item1');$('qb').onclick=()=>useBoundItem('item
 
 // Key rebinding
 const ACTIONS=[['forward','Move forward'],['back','Move back'],['left','Strafe left'],['right','Strafe right'],['sprint','Sprint'],['jump','Jump'],['pause','Pause'],['inventory','Inventory'],['map','Open map'],['use','Use'],['item1','Item 1'],['item2','Item 2'],['w1','Weapon 1'],['w2','Weapon 2'],['w3','Weapon 3'],['compendium','Compendium']];
-let rebind=null,mapOpen=false;
+let rebind=null,mapOpen=false,mapBack=null;
 function onKey(e){
   if(rebind){
     e.preventDefault();const r=rebind;rebind=null;
@@ -666,8 +666,8 @@ function onKey(e){
   }
   if(compOpen()&&(e.code===B.compendium||e.code==='Escape')){e.preventDefault();closeComp();return}
   if(invOpen()&&(e.code===B.inventory||e.code==='Escape')){e.preventDefault();closeInv();return}
+  if(mapOpen&&(e.code==='Escape'||e.code===B.map)){e.preventDefault();leaveMap();return}
   keys[e.code]=true;
-  if(state==='paused'&&mapOpen&&e.code===B.map){resume();return}
   if(state!=='play')return;
   if(e.code===B.jump){e.preventDefault();if(!e.repeat)jumpPressed=true}
   if(e.code==='Escape'||e.code===B.pause)pause();
@@ -814,6 +814,8 @@ const worldOpen=w=>w===WORLDS[0]||WORLDS[WORLDS.indexOf(w)-1].nodes.some(n=>n.fi
 const canGo=n=>worldOpen(n.w)&&(n.id===n.w.start||nbrs(n).some(isDone));
 let LV=nodeById(PROG.at),areaClear=false,inHome=false,padHot=null;const gates=[];
 const ov=$('ov'),menu=$('menu');
+function leaveMap(){if(!mapOpen)return;const back=mapBack||mainMenu;mapOpen=false;mapBack=null;back()}
+ov.addEventListener('click',e=>{if(mapOpen&&!menu.contains(e.target))leaveMap()});
 function save(){Store.save()}
 function applyOpts(){camera.fov=OPT.fov;camera.updateProjectionMatrix()}applyOpts();
 function unlockAudio(){try{ac=ac||new (window.AudioContext||window.webkitAudioContext)();if(ac.state==='suspended')ac.resume()}catch(e){}}
@@ -831,7 +833,8 @@ function mainMenu(){
   btn('Enter home',resume,'main');btn('Open map',()=>worldMap(null,null,mainMenu));btn('Inventory',()=>inventory(mainMenu));btn('Options',()=>options(mainMenu));btn('Compendium',()=>compendium(mainMenu));btn('Exit game',exitGame);
 }
 function worldOverview(back){
-  screen('All destinations','Select a world or any destination to inspect it. Open destinations can be entered from their detail view.');
+  screen('Sol Navigation Map','');
+  const returnTo=back||mainMenu,previous=()=>worldOverview(returnTo);mapBack=returnTo;
   const columns=2,rowH=108,height=Math.ceil(WORLDS.length/columns)*rowH;
   let h=`<svg viewBox="0 0 320 ${height}" role="group" aria-label="All worlds and destinations">`;
   WORLDS.forEach((w,index)=>{
@@ -853,17 +856,17 @@ function worldOverview(back){
   });
   menu.innerHTML=h+'</svg>';menu.className='map';mapOpen=true;
   menu.querySelectorAll('[data-world-map]').forEach(el=>{
-    const w=WORLDS.find(x=>x.id===el.dataset.worldMap),open=()=>worldMap(w,null,back);
+    const w=WORLDS.find(x=>x.id===el.dataset.worldMap),open=()=>worldMap(w,null,previous);
     el.onclick=open;el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();open()}};
   });
   menu.querySelectorAll('[data-map-node]').forEach(el=>{
-    const n=nodeById(el.dataset.mapNode),open=()=>worldMap(n.w,n,back);
+    const n=nodeById(el.dataset.mapNode),open=()=>worldMap(n.w,n,previous);
     el.onclick=open;el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();open()}};
   });
-  btn('Back',back||mainMenu);
 }
 function worldMap(w,sel,back){
   if(!w)return worldOverview(back);
+  mapBack=back||mainMenu;
   sel=sel||(w===LV.w?LV:null);const wi=WORLDS.indexOf(w);
   const details=sel?sel.name+': '+sel.desc+' '+sel.waves+' waves'+(isDone(sel)?'. Cleared, best '+PROG.done[sel.id]+'.':canGo(sel)?'. Open destination.':'. Locked destination.'):'Pick a destination on the map.';
   screen(w.name,details);
@@ -875,15 +878,7 @@ function worldMap(w,sel,back){
   });
   menu.innerHTML=h+'</svg>';menu.className='map';mapOpen=true;
   menu.querySelectorAll('g[data-n]').forEach(g=>{const n=nodeById(g.dataset.n);const f=()=>worldMap(w,n,back);g.onclick=f;g.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();f()}}});
-  if(sel&&canGo(sel)){
-    if(sel===LV&&state==='paused'&&!inHome)btn('Back to '+sel.name,resume,'main');
-    else btn('Travel to '+sel.name,()=>enterArea(sel,null,false),'main');
-  }
-  btn('All destinations',()=>worldOverview(back));
-  if(wi>0)btn('Previous world: '+WORLDS[wi-1].name,()=>worldMap(WORLDS[wi-1],null,back));
-  if(WORLDS[wi+1]&&worldOpen(WORLDS[wi+1]))btn('Next world: '+WORLDS[wi+1].name,()=>worldMap(WORLDS[wi+1],null,back));
-  else if(WORLDS[wi+1])btn('Next world locked: clear the '+w.nodes.find(n=>n.final).name,()=>{},'',true);
-  btn('Back',back||mainMenu);
+  if(sel&&canGo(sel)&&!(sel===LV&&state==='paused'&&!inHome))btn('Travel to '+sel.name,()=>{mapOpen=false;mapBack=null;enterArea(sel,null,false)},'main');
 }
 function options(back){
   screen('Options','Saved on this device.');
