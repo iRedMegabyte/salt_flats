@@ -203,9 +203,7 @@ function resolve(p,r){
 
 // Gun
 const gun=new THREE.Group();
-const gb=new THREE.Mesh(new THREE.BoxGeometry(.12,.14,.6),new THREE.MeshLambertMaterial({color:0x222233}));
-const gt=new THREE.Mesh(new THREE.BoxGeometry(.05,.05,.3),new THREE.MeshLambertMaterial({color:0x46e0d0}));
-gt.position.set(0,.03,-.4);gun.add(gb,gt);gun.position.set(.28,-.26,-.55);camera.add(gun);
+gun.position.set(.28,-.26,-.55);camera.add(gun);
 const flash=new THREE.PointLight(0xffd23f,0,8);flash.position.set(0,0,-1);camera.add(flash);
 
 // State
@@ -432,6 +430,55 @@ const ITEMS={
  spectre:{name:'Spectre',slot:'companion',heal:.05,wait:5,interval:1,range:20,col:0x9d7cff,scrap:18,desc:'Heals you in 5% chunks every second after 5 seconds of no damage.'}};
 const DEFAULT_SCRAP_VALUE=5;
 for(const item of Object.values(ITEMS))item.scrap??=DEFAULT_SCRAP_VALUE;
+let gunModelId;
+function makeGunModel(id){
+  const model=new THREE.Group();
+  const material=color=>new THREE.MeshLambertMaterial({color});
+  const part=(geometry,mat,x=0,y=0,z=0,rx=0)=>{
+    const mesh=new THREE.Mesh(geometry,mat);mesh.position.set(x,y,z);mesh.rotation.x=rx;model.add(mesh);return mesh;
+  };
+  const box=(w,h,d,mat,x=0,y=0,z=0,rx=0)=>part(new THREE.BoxGeometry(w,h,d),mat,x,y,z,rx);
+  const tube=(radius,length,mat,x,y,z)=>part(new THREE.CylinderGeometry(radius,radius,length,10),mat,x,y,z,Math.PI/2);
+  if(id==='smg'){
+    const frame=material(0x26343a),edge=material(0x11191d),accent=material(0xff7048),barrel=material(0x607176);
+    box(.17,.18,.48,frame,0,0,0);
+    box(.13,.07,.23,edge,0,.12,-.03);
+    box(.12,.22,.14,edge,0,-.16,.08,-.12);
+    box(.08,.15,.12,frame,0,-.14,-.17);
+    tube(.035,.42,barrel,0,.01,-.43);
+    box(.055,.035,.24,accent,0,.115,-.12);
+    box(.19,.035,.31,edge,0,.145,-.03);
+    box(.12,.035,.055,accent,0,-.085,.01);
+  }else if(id==='rifle'){
+    const frame=material(0x59614a),edge=material(0x252c26),accent=material(0xd5ae55),barrel=material(0x798078);
+    box(.18,.2,.54,frame,0,0,.02);
+    box(.15,.12,.26,edge,0,-.025,.37);
+    box(.13,.24,.15,edge,0,-.19,.04,-.08);
+    box(.055,.09,.28,accent,0,-.12,-.02);
+    tube(.034,.64,barrel,0,.015,-.52);
+    box(.055,.055,.3,edge,0,.15,-.04);
+    tube(.048,.2,accent,0,.23,-.035);
+    box(.09,.1,.12,edge,0,.235,-.035);
+    box(.22,.06,.1,accent,0,0,-.79);
+  }else{
+    const frame=material(0x303447),edge=material(0x171b28),accent=material(0x46e0d0),barrel=material(0x727c87);
+    box(.16,.16,.34,frame,0,0,.015);
+    box(.12,.1,.2,edge,0,.09,-.045);
+    box(.11,.23,.13,edge,0,-.15,.11,-.18);
+    tube(.032,.3,barrel,0,.005,-.29);
+    box(.07,.035,.18,accent,0,.105,-.045);
+    box(.19,.035,.13,edge,0,.105,.105);
+    box(.17,.045,.08,accent,0,-.015,-.24);
+  }
+  return model;
+}
+function syncGunModel(){
+  const id=EQ.weapons[wSel]||null;
+  if(id===gunModelId)return;
+  gunModelId=id;
+  while(gun.children.length)gun.remove(gun.children[0]);
+  if(id)gun.add(makeGunModel(id));
+}
 const GEAR=Object.keys(ITEMS).filter(k=>ITEMS[k].slot&&k!=='blaster');
 const DROP={chance:.45,scrap:.55,medkit:.22,boost:.15}; // gear gets whatever is left
 const PCOL={medkit:0x46e0d0,boost:0xff3d6e,scrap:0xcfcfcf};
@@ -958,6 +1005,7 @@ function tick(){
     const b=bits[i];b.t-=dt;b.v.y-=14*dt;b.m.position.addScaledVector(b.v,dt);
     if(b.t<=0){scene.remove(b.m);bits.splice(i,1)}
   }
+  syncGunModel();
   renderer.render(scene,camera);
 }
 camera.position.set(0,1.7,0);
