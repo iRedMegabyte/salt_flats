@@ -50,10 +50,18 @@ canvas{display:block;position:fixed;inset:0;width:100%;height:100%}
 #quick.on{display:flex}
 #quick button{pointer-events:auto;font:inherit;font-size:13px;font-weight:700;color:var(--ink);background:#0007;border:1px solid #fff6;border-radius:8px;padding:6px 10px}
 #toast{position:absolute;left:50%;bottom:22%;transform:translateX(-50%);opacity:0;transition:opacity .25s;background:#0008;padding:8px 14px;border-radius:8px;font-weight:700}
-#menu.map{width:min(700px,100%);max-height:76vh}
+#menu.map{width:min(700px,calc(100% - 80px));max-height:76vh}
 #menu.map svg{width:100%;height:auto;margin-bottom:4px}
 #menu.map g:focus-visible{outline:none}
 #menu.map g:focus-visible circle{stroke:#fff4dc}
+#map-back-left,#map-back-right{display:none;position:fixed;top:0;bottom:0;width:40px;z-index:6;align-items:center;justify-content:center;border:0;border-radius:0;background:#1b1d3d99;color:var(--ink);font:700 34px/1 sans-serif;cursor:pointer;touch-action:manipulation}
+#map-back-left::before,#map-back-right::before{content:"";position:absolute;top:0;bottom:0;width:clamp(100px,16vw,220px);pointer-events:none;opacity:.85}
+#map-back-left::before{left:0;background:linear-gradient(90deg,#000c 0%,#0008 35%,transparent 100%)}
+#map-back-right::before{right:0;background:linear-gradient(270deg,#000c 0%,#0008 35%,transparent 100%)}
+#map-back-left{left:0}
+#map-back-right{right:0}
+#map-back-left:not([hidden]),#map-back-right:not([hidden]){display:flex}
+#map-back-left:focus-visible,#map-back-right:focus-visible{outline:3px solid var(--cool);outline-offset:-4px}
 #inv{display:none;position:fixed;inset:0;z-index:7;background:#1b1d3df5;overflow-y:auto;padding:calc(env(safe-area-inset-top,0px) + 14px) 14px calc(env(safe-area-inset-bottom,0px) + 20px)}
 #inv.on{display:block}
 #inv .wrap{max-width:1000px;margin:0 auto;display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(270px,1fr))}
@@ -105,7 +113,7 @@ canvas{display:block;position:fixed;inset:0;width:100%;height:100%}
 <div id="hudData" aria-hidden="true"><span id="sc">0</span><span id="scr">0</span><span id="lv"></span><span id="wv">1</span><span id="dr">0</span></div>
 <div id="touch"><div id="stick"><div id="knob"></div></div><div id="fire">FIRE</div><button id="jump" type="button" aria-label="Jump">JUMP</button><button id="aim" type="button" aria-label="Aim down sights" aria-pressed="false">AIM</button></div>
 <button id="pb" aria-label="Pause">II</button>
-<div id="ov"><h1 id="t"></h1><p id="m"></p><div id="menu"></div></div>
+<div id="ov"><button id="map-back-left" type="button" aria-label="Back to previous menu" hidden>&lsaquo;</button><button id="map-back-right" type="button" aria-label="Back to previous menu" hidden>&lsaquo;</button><h1 id="t"></h1><p id="m"></p><div id="menu"></div></div>
 <div id="inv" role="dialog" aria-label="Inventory"></div>
 <div id="comp" role="dialog" aria-label="Compendium"></div>
 <div id="warn" role="alertdialog" aria-label="Backpack full"></div>
@@ -814,13 +822,15 @@ const worldOpen=w=>w===WORLDS[0]||WORLDS[WORLDS.indexOf(w)-1].nodes.some(n=>n.fi
 const canGo=n=>worldOpen(n.w)&&(n.id===n.w.start||nbrs(n).some(isDone));
 let LV=nodeById(PROG.at),areaClear=false,inHome=false,padHot=null;const gates=[];
 const ov=$('ov'),menu=$('menu');
-function leaveMap(){if(!mapOpen)return;const back=mapBack||mainMenu;mapOpen=false;mapBack=null;back()}
-ov.addEventListener('click',e=>{if(mapOpen&&!menu.contains(e.target))leaveMap()});
+const mapBackZones=[$('map-back-left'),$('map-back-right')];
+function setMapBackZones(visible){mapBackZones.forEach(zone=>{zone.hidden=!visible})}
+function leaveMap(){if(!mapOpen)return;const back=mapBack||mainMenu;mapOpen=false;mapBack=null;setMapBackZones(false);back()}
+mapBackZones.forEach(zone=>zone.addEventListener('click',e=>{e.stopPropagation();leaveMap()}));
 function save(){Store.save()}
 function applyOpts(){camera.fov=OPT.fov;camera.updateProjectionMatrix()}applyOpts();
 function unlockAudio(){try{ac=ac||new (window.AudioContext||window.webkitAudioContext)();if(ac.state==='suspended')ac.resume()}catch(e){}}
 function release(){firing=false;aiming=false;jumpPressed=false;if(document.exitPointerLock&&document.pointerLockElement)document.exitPointerLock()}
-function screen(title,msg){$('t').textContent=title;$('m').textContent=msg||'';menu.innerHTML='';menu.className='';mapOpen=false;ov.style.display='flex';$('pb').classList.remove('on');$('quick').classList.remove('on')}
+function screen(title,msg){$('t').textContent=title;$('m').textContent=msg||'';menu.innerHTML='';menu.className='';mapOpen=false;setMapBackZones(false);ov.style.display='flex';$('pb').classList.remove('on');$('quick').classList.remove('on')}
 function btn(label,fn,cls,off){const b=document.createElement('button');b.textContent=label;b.className=cls||'';b.disabled=!!off;b.onclick=()=>{unlockAudio();fn()};menu.appendChild(b);return b}
 function slider(label,key,min,max,step,fmt){
   const l=document.createElement('label'),v=document.createElement('span'),i=document.createElement('input');
@@ -854,7 +864,7 @@ function worldOverview(back){
       h+=`<g data-map-node="${n.id}" tabindex="0" role="button" aria-label="${n.name}, ${available?'open':'locked'}${done?', cleared':''}" style="cursor:pointer"><circle cx="${px(n)}" cy="${py(n)}" r="${n.final?4.3:3.5}" fill="${fill}" stroke="${stroke}" stroke-width="${here?1.5:1}"/><text x="${px(n)}" y="${py(n)+8}" text-anchor="middle" font-size="4.2" font-weight="700" fill="${available||done?'#fff4dc':'#a3adb2'}">${n.name}</text>${n.final?`<text x="${px(n)}" y="${py(n)+1.5}" text-anchor="middle" font-size="3.5" fill="#1b1d3d">&#9733;</text>`:''}</g>`;
     });
   });
-  menu.innerHTML=h+'</svg>';menu.className='map';mapOpen=true;
+  menu.innerHTML=h+'</svg>';menu.className='map';mapOpen=true;setMapBackZones(true);
   menu.querySelectorAll('[data-world-map]').forEach(el=>{
     const w=WORLDS.find(x=>x.id===el.dataset.worldMap),open=()=>worldMap(w,null,previous);
     el.onclick=open;el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();open()}};
@@ -876,9 +886,9 @@ function worldMap(w,sel,back){
     const g=canGo(n),d=isDone(n),here=n===LV;
     h+=`<g data-n="${n.id}" ${g?'tabindex="0" role="button" style="cursor:pointer"':'opacity=".4"'} aria-label="${n.name}${g?'':' (locked)'}"><circle cx="${n.x}" cy="${n.y}" r="${n===sel?9:7}" fill="${d?'#ffd23f':'#1b1d3d'}" stroke="${here?'#fff4dc':g?'#46e0d0':'#fff6'}" stroke-width="${here?2.6:1.6}"/>${n.final?`<text x="${n.x}" y="${n.y+2.6}" text-anchor="middle" font-size="7" fill="${d?'#1b1d3d':'#ffd23f'}">&#9733;</text>`:''}<text x="${n.x}" y="${n.y+16}" text-anchor="middle" font-size="5.5" font-weight="700" fill="#fff4dc">${n.name}</text></g>`;
   });
-  menu.innerHTML=h+'</svg>';menu.className='map';mapOpen=true;
+  menu.innerHTML=h+'</svg>';menu.className='map';mapOpen=true;setMapBackZones(true);
   menu.querySelectorAll('g[data-n]').forEach(g=>{const n=nodeById(g.dataset.n);const f=()=>worldMap(w,n,back);g.onclick=f;g.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();f()}}});
-  if(sel&&canGo(sel)&&!(sel===LV&&state==='paused'&&!inHome))btn('Travel to '+sel.name,()=>{mapOpen=false;mapBack=null;enterArea(sel,null,false)},'main');
+  if(sel&&canGo(sel)&&!(sel===LV&&state==='paused'&&!inHome))btn('Travel to '+sel.name,()=>{mapOpen=false;mapBack=null;setMapBackZones(false);enterArea(sel,null,false)},'main');
 }
 function options(back){
   screen('Options','Saved on this device.');
