@@ -50,16 +50,13 @@ canvas{display:block;position:fixed;inset:0;width:100%;height:100%}
 #quick.on{display:flex}
 #quick button{pointer-events:auto;font:inherit;font-size:13px;font-weight:700;color:var(--ink);background:#0007;border:1px solid #fff6;border-radius:8px;padding:6px 10px}
 #toast{position:absolute;left:50%;bottom:22%;transform:translateX(-50%);opacity:0;transition:opacity .25s;background:#0008;padding:8px 14px;border-radius:8px;font-weight:700}
-#menu.map{width:min(700px,calc(100% - 80px));max-height:76vh}
+#menu.map{width:min(700px,calc(100% - clamp(104px,20vw,300px)));max-height:76vh}
 #menu.map svg{width:100%;height:auto;margin-bottom:4px}
 #menu.map g:focus-visible{outline:none}
 #menu.map g:focus-visible circle{stroke:#fff4dc}
-#map-back-left,#map-back-right{display:none;position:fixed;top:0;bottom:0;width:40px;z-index:6;align-items:center;justify-content:center;border:0;border-radius:0;background:#1b1d3d99;color:var(--ink);font:700 34px/1 sans-serif;cursor:pointer;touch-action:manipulation}
-#map-back-left::before,#map-back-right::before{content:"";position:absolute;top:0;bottom:0;width:clamp(100px,16vw,220px);pointer-events:none;opacity:.85}
-#map-back-left::before{left:0;background:linear-gradient(90deg,#000c 0%,#0008 35%,transparent 100%)}
-#map-back-right::before{right:0;background:linear-gradient(270deg,#000c 0%,#0008 35%,transparent 100%)}
-#map-back-left{left:0}
-#map-back-right{right:0}
+#map-back-left,#map-back-right{display:none;position:fixed;top:0;bottom:0;width:clamp(52px,10vw,150px);z-index:6;align-items:center;justify-content:center;border:0;border-radius:0;color:transparent;font-size:0;cursor:pointer;touch-action:manipulation}
+#map-back-left{left:0;background:linear-gradient(90deg,#000c 0%,#0008 45%,transparent 100%)}
+#map-back-right{right:0;background:linear-gradient(270deg,#000c 0%,#0008 45%,transparent 100%)}
 #map-back-left:not([hidden]),#map-back-right:not([hidden]){display:flex}
 #map-back-left:focus-visible,#map-back-right:focus-visible{outline:3px solid var(--cool);outline-offset:-4px}
 #inv{display:none;position:fixed;inset:0;z-index:7;background:#1b1d3df5;overflow-y:auto;padding:calc(env(safe-area-inset-top,0px) + 14px) 14px calc(env(safe-area-inset-bottom,0px) + 20px)}
@@ -113,7 +110,7 @@ canvas{display:block;position:fixed;inset:0;width:100%;height:100%}
 <div id="hudData" aria-hidden="true"><span id="sc">0</span><span id="scr">0</span><span id="lv"></span><span id="wv">1</span><span id="dr">0</span></div>
 <div id="touch"><div id="stick"><div id="knob"></div></div><div id="fire">FIRE</div><button id="jump" type="button" aria-label="Jump">JUMP</button><button id="aim" type="button" aria-label="Aim down sights" aria-pressed="false">AIM</button></div>
 <button id="pb" aria-label="Pause">II</button>
-<div id="ov"><button id="map-back-left" type="button" aria-label="Back to previous menu" hidden>&lsaquo;</button><button id="map-back-right" type="button" aria-label="Back to previous menu" hidden>&lsaquo;</button><h1 id="t"></h1><p id="m"></p><div id="menu"></div></div>
+<div id="ov"><button id="map-back-left" type="button" aria-label="Back to previous menu" hidden></button><button id="map-back-right" type="button" aria-label="Back to previous menu" hidden></button><h1 id="t"></h1><p id="m"></p><div id="menu"></div></div>
 <div id="inv" role="dialog" aria-label="Inventory"></div>
 <div id="comp" role="dialog" aria-label="Compendium"></div>
 <div id="warn" role="alertdialog" aria-label="Backpack full"></div>
@@ -231,6 +228,30 @@ function resolve(p,r){
   }
   p.x=Math.max(-LIM,Math.min(LIM,p.x));p.z=Math.max(-LIM,Math.min(LIM,p.z));
 }
+const PLAYER_RADIUS=.5;
+function enemyHitboxRadius(enemy){
+  if(!enemy.geometry.boundingSphere)enemy.geometry.computeBoundingSphere();
+  return enemy.geometry.boundingSphere.radius*Math.max(Math.abs(enemy.scale.x),Math.abs(enemy.scale.z));
+}
+function separatePair(first,firstRadius,second,secondRadius,fallbackAngle){
+  let dx=second.x-first.x,dz=second.z-first.z;
+  const distance=Math.hypot(dx,dz),minimum=firstRadius+secondRadius;
+  if(distance>=minimum)return;
+  if(distance<.001){dx=Math.cos(fallbackAngle);dz=Math.sin(fallbackAngle)}
+  else{dx/=distance;dz/=distance}
+  const push=(minimum-distance)*.5;
+  first.x-=dx*push;first.z-=dz*push;second.x+=dx*push;second.z+=dz*push;
+}
+function separateActors(){
+  for(let pass=0;pass<48;pass++){
+    enemies.forEach((enemy,index)=>separatePair(P,PLAYER_RADIUS,enemy.position,enemyHitboxRadius(enemy),(index+1)*2.4));
+    for(let first=0;first<enemies.length;first++)for(let second=first+1;second<enemies.length;second++){
+      separatePair(enemies[first].position,enemyHitboxRadius(enemies[first]),enemies[second].position,enemyHitboxRadius(enemies[second]),(second+1)*2.4);
+    }
+    resolve(P,PLAYER_RADIUS);
+    enemies.forEach(enemy=>resolve(enemy.position,enemyHitboxRadius(enemy)));
+  }
+}
 
 // Gun
 const gun=new THREE.Group();
@@ -243,10 +264,10 @@ let jumpHeight=0,jumpVelocity=0,jumpPressed=false,jumpsUsed=0,glideTime=0,glideA
 let state='menu',score=0,wave=0,fireCd=0,flashT=0,hurtCd=0,bob=0;
 let gameTime=0,lastDamageAt=0,lastSpectreHeal=0;
 const enemies=[],bits=[],projectiles=[];
-const eGeo=new THREE.OctahedronGeometry(.7,0);
 const ENEMY_TYPES={
   flies:{
     name:'Flies',
+    geometry:new THREE.OctahedronGeometry(.7,0),
     color:0xffd23f,
     emissive:0x664400,
     hp:2,
@@ -254,13 +275,13 @@ const ENEMY_TYPES={
     baseSpeed:2.4,
     damage:6,
     contactRange:1.6,
-    radius:0.7,
     bob:0.25,
     score:10,
     attack:'melee'
   },
   marshalls:{
     name:'Marshalls',
+    geometry:new THREE.OctahedronGeometry(.75,0),
     color:0x46e0d0,
     emissive:0x0d385a,
     hp:2,
@@ -268,7 +289,6 @@ const ENEMY_TYPES={
     baseSpeed:2.4,
     damage:6,
     contactRange:1.4,
-    radius:0.75,
     bob:0.25,
     score:14,
     attack:'ranged',
@@ -280,6 +300,7 @@ const ENEMY_TYPES={
   },
   barons:{
     name:'Barons',
+    geometry:new THREE.OctahedronGeometry(.9,0),
     color:0xff3d6e,
     emissive:0x520000,
     hp:2,
@@ -287,7 +308,6 @@ const ENEMY_TYPES={
     baseSpeed:4.8,
     damage:12,
     contactRange:1.7,
-    radius:0.9,
     bob:0.35,
     score:18,
     attack:'melee'
@@ -299,7 +319,7 @@ function makeEnemy(typeId, overrides={}){
   const def=ENEMY_TYPES[typeId]||ENEMY_TYPES.flies;
   const spec={...def,...overrides};
   const material=new THREE.MeshLambertMaterial({color:spec.color,emissive:spec.emissive});
-  const m=new THREE.Mesh(eGeo,material);
+  const m=new THREE.Mesh(spec.geometry,material);
   m.userData={
     type:typeId,
     name:spec.name,
@@ -308,7 +328,6 @@ function makeEnemy(typeId, overrides={}){
     speed:spec.speed,
     damage:spec.damage,
     contactRange:spec.contactRange,
-    radius:spec.radius,
     ph:Math.random()*6,
     hf:0,
     score:spec.score,
@@ -718,7 +737,7 @@ function renderInv(){
   let id=null;if(invSel)id=invSel.a==='bag'?(INV.slots[+invSel.k]||{}).id:invSel.a==='ability'?invSel.k:refSlot(refOf(invSel.k));
   if(!id)invSel=null;
   const sel=(a,k)=>invSel&&invSel.a===a&&invSel.k==k;
-  let h=`<div class="wrap"><header><h2>Inventory</h2><span>Scrap ${WAL.scrap.toLocaleString()} / ${SCRAP_CAP.toLocaleString()}</span><span>Slots ${INV.slots.length} / ${INV.cap}</span><button class="cell" data-a="close">Close (${keyName(B.inventory)})</button></header>`;
+  let h=`<div class="wrap"><header><h2>Inventory</h2><span>Scrap ${WAL.scrap.toLocaleString()}</span><span>Slots ${INV.slots.length} / ${INV.cap}</span><button class="cell" data-a="close">Close (${keyName(B.inventory)})</button></header>`;
   h+=`<section><h3>Vitals</h3><div class="st"><span>Health</span><b>${Math.ceil(P.hp)} / ${mh}</b></div><div class="bar"><i style="width:${Math.max(0,P.hp/mh*100)}%"></i></div>
    <div class="st"><span>Armor</span><b>${bonus('armor')} (${Math.round(armorRed()*100)}% less damage)</b></div>
    <div class="st"><span>Overcharge</span><b>${boostT>0?Math.ceil(boostT)+'s':'Off'}</b></div>
@@ -1057,7 +1076,7 @@ function tick(){
     let s=(keys[B.right]||keys.ArrowRight?1:0)-(keys[B.left]||keys.ArrowLeft?1:0)+mv.x;
     const l=Math.hypot(f,s);if(l>1){f/=l;s/=l}
     const sp=(keys[B.sprint]?9:6)*(1+bonus('speed'))*dt,sy=Math.sin(P.yaw),cy=Math.cos(P.yaw);
-    P.x+=(-sy*f+cy*s)*sp;P.z+=(-cy*f-sy*s)*sp;resolve(P,.5);
+    P.x+=(-sy*f+cy*s)*sp;P.z+=(-cy*f-sy*s)*sp;resolve(P,PLAYER_RADIUS);
     if(l>0)bob+=dt*10;
     const jumpItem=ABILITIES[EQ.jumpType];
     if(jumpPressed){
@@ -1118,13 +1137,14 @@ function tick(){
         e.position.addScaledVector(e.userData.knockback,dt);
         e.userData.knockback.multiplyScalar(Math.max(0,1-dt*8));
       }else e.userData.knockback.set(0,0,0);
-      resolve(e.position,.6);
+      resolve(e.position,enemyHitboxRadius(e));
       if(d<e.userData.contactRange&&jumpHeight<1.1&&hurtCd<=0){
         hurtCd=.7;P.hp-=e.userData.damage*(1-armorRed());lastDamageAt=gameTime;hudHp();
         $('vig').style.opacity=.9;setTimeout(()=>$('vig').style.opacity=0,200);beep(110,.2,'sawtooth',.1);
         if(P.hp<=0){over()}
       }
     }
+    separateActors();
     for(let i=projectiles.length-1;i>=0;i--){
       const p=projectiles[i];
       const travel=p.velocity.length()*dt;
