@@ -4,7 +4,7 @@ A browser-based first-person shooter built with Three.js. Travel between destina
 
 ## Run the game
 
-Visit <https://iredmegabyte.github.io/salt_flats/>
+Visit <https://iredmegabyte.github.io/salt_flats/salt-flats-shooter.html>
 
 ## Build 
 
@@ -18,7 +18,7 @@ python3 -m http.server 8000
 
 Then open <http://localhost:8000/salt-flats-shooter.html>.
 
-## Play
+## Gameplay
 
 Start at Home, a safe hub where you can open the navigation map, inventory, and compendium. Choose an available destination, clear its drone waves, collect drops, then travel through an exit gate or return to the map. Clearing a world's final destination unlocks the next world. Cleared destinations can be revisited.
 
