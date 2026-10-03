@@ -142,6 +142,26 @@ const Store=(()=>{
     stats:{kills:0,runs:0},upgrades:{},weaponLevels:{}});
   const isObj=x=>x&&typeof x==='object'&&!Array.isArray(x);
   function merge(d,src){for(const k in d){if(src&&src[k]!==undefined){if(isObj(d[k])&&Object.keys(d[k]).length)merge(d[k],src[k]);else d[k]=src[k]}}return d}
+  function validateImport(saved){
+    const obj=(v,name)=>{if(!isObj(v))throw new Error(name+' must be an object')};
+    const arr=(v,name)=>{if(!Array.isArray(v))throw new Error(name+' must be an array')};
+    obj(saved,'Save');
+    if(saved.v!==undefined&&(!Number.isInteger(saved.v)||saved.v<1||saved.v>VER))throw new Error('Unsupported save version');
+    for(const key of ['options','keys','progress','inventory','abilities','equipment','wallet','stats','upgrades','weaponLevels'])obj(saved[key],'Save '+key);
+    obj(saved.progress.done,'Save progress.done');obj(saved.progress.looted,'Save progress.looted');
+    obj(saved.inventory,'Save inventory');arr(saved.inventory.slots,'Save inventory.slots');
+    saved.inventory.slots.forEach((slot,i)=>{
+      obj(slot,'Inventory slot '+(i+1));
+      if(typeof slot.id!=='string'||!Number.isFinite(slot.n)||slot.n<1)throw new Error('Invalid inventory slot '+(i+1));
+    });
+    arr(saved.abilities.items,'Save abilities.items');
+    obj(saved.equipment,'Save equipment');arr(saved.equipment.weapons,'Save equipment.weapons');
+    arr(saved.equipment.itemSlots,'Save equipment.itemSlots');obj(saved.equipment.armor,'Save equipment.armor');
+    if(!Number.isFinite(saved.wallet.scrap)||saved.wallet.scrap<0)throw new Error('Invalid scrap amount');
+    if(!Number.isFinite(saved.stats.kills)||!Number.isFinite(saved.stats.runs))throw new Error('Invalid player stats');
+    for(const [key,value] of Object.entries(saved.weaponLevels))if(!Number.isFinite(value)||value<0)throw new Error('Invalid weapon level for '+key);
+    return saved;
+  }
   function load(){
     let d=defaults(),dirty=false;
     try{
@@ -164,6 +184,11 @@ const Store=(()=>{
   }
   const data=load();
   return{data,defaults,save(){adapter.set(KEY,JSON.stringify(data))},
+    import(raw){
+      let saved;
+      try{saved=validateImport(JSON.parse(raw))}catch(e){throw new Error('Could not read save: '+e.message)}
+      try{localStorage.setItem(KEY,JSON.stringify(saved))}catch(e){throw new Error('Could not store save in this browser: '+e.message)}
+    },
     reset(){const f=defaults();for(const k in f)if(isObj(f[k])){Object.keys(data[k]).forEach(x=>delete data[k][x]);Object.assign(data[k],f[k])}this.save()}};
 })();
 const OPT=Store.data.options,B=Store.data.keys,INV=Store.data.inventory,ABIL=Store.data.abilities,PROG=Store.data.progress,EQ=Store.data.equipment,WAL=Store.data.wallet;
@@ -910,7 +935,17 @@ const WORLDS=[
   {id:'cinder',name:'Cinder Gate',x:20,y:50,to:['vents','forge'],crates:10,waves:4,speed:1.5,sky:0x3a1a1a,fog:0xa04a3a,desc:'Ash drifts across the old border.'},
   {id:'vents',name:'Vent Fields',x:65,y:25,to:['core'],crates:6,waves:5,speed:1.55,sky:0x421f14,fog:0xc0603a,desc:'Hot, open, and loud.'},
   {id:'forge',name:'Dead Forge',x:65,y:78,to:['core'],crates:24,waves:5,speed:1.55,sky:0x2a1a24,fog:0x8a4a5a,desc:'Slag walls make a cramped fight.'},
-  {id:'core',name:'Ember Core',x:125,y:52,to:[],crates:12,waves:7,speed:1.8,sky:0x4a1a10,fog:0xe0703a,final:true,desc:'The source of the swarm.'}]}];
+  {id:'core',name:'Ember Core',x:125,y:52,to:[],crates:12,waves:7,speed:1.8,sky:0x4a1a10,fog:0xe0703a,final:true,desc:'The source of the swarm.'}]},
+ {id:'earth',name:'Earth',start:'russia',submenu:true,menuTitle:'Earth Destinations',nodes:[
+  {id:'russia',name:'Russia',x:25,y:28,to:['chicago'],crates:0,waves:1,speed:1,sky:0x26334a,fog:0x60718a,desc:'Placeholder destination on Earth.'},
+  {id:'chicago',name:'Chicago',x:80,y:72,to:['germany'],crates:0,waves:1,speed:1,sky:0x26334a,fog:0x60718a,desc:'Placeholder destination on Earth.'},
+  {id:'germany',name:'Germany',x:135,y:28,to:[],crates:0,waves:1,speed:1,sky:0x26334a,fog:0x60718a,final:true,desc:'Placeholder destination on Earth.'}]},
+ {id:'luna',name:'Luna',start:'luna',nodes:[
+  {id:'luna',name:'Luna',x:80,y:50,to:[],crates:0,waves:1,speed:1,sky:0x263044,fog:0x57647a,final:true,desc:'Placeholder lunar destination.'}]},
+ {id:'venus',name:'Venus',start:'venus',nodes:[
+  {id:'venus',name:'Venus',x:80,y:50,to:[],crates:0,waves:1,speed:1,sky:0x4a3026,fog:0x9a694d,final:true,desc:'Placeholder Venus destination.'}]},
+ {id:'mars',name:'Mars',start:'mars',nodes:[
+  {id:'mars',name:'Mars',x:80,y:50,to:[],crates:0,waves:1,speed:1,sky:0x48251f,fog:0x9a5140,final:true,desc:'Placeholder Mars destination.'}]}];
 const NODES=WORLDS.flatMap(w=>w.nodes);WORLDS.forEach(w=>w.nodes.forEach(n=>n.w=w));
 const nodeById=id=>NODES.find(n=>n.id===id)||NODES[0];
 const nbrs=n=>n.w.nodes.filter(m=>n.to.includes(m.id)||m.to.includes(n.id));
@@ -943,19 +978,23 @@ function worldOverview(back){
   let h=`<svg viewBox="0 0 320 ${height}" role="group" aria-label="All worlds and destinations">`;
   WORLDS.forEach((w,index)=>{
     const ox=(index%columns)*160+3,oy=Math.floor(index/columns)*rowH+3;
+    const open=worldOpen(w);
+    if(w.submenu){
+      h+=`<g data-world-map="${w.id}" tabindex="0" role="button" aria-label="Open ${w.menuTitle}" style="cursor:pointer"><rect x="${ox}" y="${oy}" width="154" height="102" rx="3" fill="${open?'#46e0d022':'#7b858c22'}" stroke="${open?'#46e0d0':'#7b858c'}" stroke-opacity=".65"/><text x="${ox+77}" y="${oy+29}" text-anchor="middle" font-size="9" font-weight="700" fill="${open?'#46e0d0':'#a3adb2'}">${w.name}</text><circle cx="${ox+77}" cy="${oy+55}" r="12" fill="#46e0d022" stroke="${open?'#46e0d0':'#7b858c'}"/><text x="${ox+77}" y="${oy+58}" text-anchor="middle" font-size="8" fill="#fff4dc">E</text><text x="${ox+77}" y="${oy+82}" text-anchor="middle" font-size="6" fill="${open?'#fff4dc':'#a3adb2'}">${w.nodes.length} destinations</text></g>`;
+      return;
+    }
     const minX=Math.min(...w.nodes.map(n=>n.x)),maxX=Math.max(...w.nodes.map(n=>n.x));
     const minY=Math.min(...w.nodes.map(n=>n.y)),maxY=Math.max(...w.nodes.map(n=>n.y));
     const px=n=>ox+8+(n.x-minX)/(maxX-minX||1)*136;
     const py=n=>oy+29+(n.y-minY)/(maxY-minY||1)*48;
-    const open=worldOpen(w);
     h+=`<rect x="${ox}" y="${oy}" width="154" height="102" rx="3" fill="#ffffff08" stroke="${open?'#46e0d0':'#7b858c'}" stroke-opacity=".65"/>`;
-    h+=`<g data-world-map="${w.id}" tabindex="0" role="button" aria-label="Open ${w.name}${open?'':' (locked)'}" style="cursor:pointer"><rect x="${ox+1}" y="${oy+1}" width="152" height="19" fill="${open?'#46e0d022':'#7b858c22'}"/><text x="${ox+6}" y="${oy+13}" font-size="7" font-weight="700" fill="${open?'#46e0d0':'#a3adb2'}">${w.name}${open?'':' (locked)'}</text></g>`;
+    h+=`<g data-world-map="${w.id}" tabindex="0" role="button" aria-label="Open ${w.name}" style="cursor:pointer"><rect x="${ox+1}" y="${oy+1}" width="152" height="19" fill="${open?'#46e0d022':'#7b858c22'}"/><text x="${ox+6}" y="${oy+13}" font-size="7" font-weight="700" fill="${open?'#46e0d0':'#a3adb2'}">${w.name}</text></g>`;
     w.nodes.forEach(n=>nbrs(n).forEach(m=>{if(n.id<m.id)h+=`<line x1="${px(n)}" y1="${py(n)}" x2="${px(m)}" y2="${py(m)}" stroke="${isDone(n)||isDone(m)?'#46e0d0':'#7b858c'}" stroke-opacity=".65" stroke-width="1"/>`}));
     w.nodes.forEach(n=>{
       const available=canGo(n),done=isDone(n),here=n===LV;
       const fill=done?'#ffd23f':available?'#46e0d0':'#515b63';
       const stroke=here?'#fff4dc':done?'#ffd23f':available?'#46e0d0':'#7b858c';
-      h+=`<g data-map-node="${n.id}" tabindex="0" role="button" aria-label="${n.name}, ${available?'open':'locked'}${done?', cleared':''}" style="cursor:pointer"><circle cx="${px(n)}" cy="${py(n)}" r="${n.final?4.3:3.5}" fill="${fill}" stroke="${stroke}" stroke-width="${here?1.5:1}"/><text x="${px(n)}" y="${py(n)+8}" text-anchor="middle" font-size="4.2" font-weight="700" fill="${available||done?'#fff4dc':'#a3adb2'}">${n.name}</text>${n.final?`<text x="${px(n)}" y="${py(n)+1.5}" text-anchor="middle" font-size="3.5" fill="#1b1d3d">&#9733;</text>`:''}</g>`;
+      h+=`<g data-map-node="${n.id}" tabindex="0" role="button" aria-label="${n.name}${done?', cleared':''}" style="cursor:pointer"><circle cx="${px(n)}" cy="${py(n)}" r="${n.final?4.3:3.5}" fill="${fill}" stroke="${stroke}" stroke-width="${here?1.5:1}"/><text x="${px(n)}" y="${py(n)+8}" text-anchor="middle" font-size="4.2" font-weight="700" fill="${available||done?'#fff4dc':'#a3adb2'}">${n.name}</text>${n.final?`<text x="${px(n)}" y="${py(n)+1.5}" text-anchor="middle" font-size="3.5" fill="#1b1d3d">&#9733;</text>`:''}</g>`;
     });
   });
   menu.innerHTML=h+'</svg>';menu.className='map';mapOpen=true;setMapBackZones(true);
@@ -972,13 +1011,13 @@ function worldMap(w,sel,back){
   if(!w)return worldOverview(back);
   mapBack=back||pause;
   sel=sel||(w===LV.w?LV:null);const wi=WORLDS.indexOf(w);
-  const details=sel?sel.name+': '+sel.desc+' '+sel.waves+' waves'+(isDone(sel)?'. Cleared, best '+PROG.done[sel.id]+'.':canGo(sel)?'. Open destination.':'. Locked destination.'):'Pick a destination on the map.';
-  screen(w.name,details);
+  const details=sel?sel.name+': '+sel.desc+' '+sel.waves+' waves'+(isDone(sel)?'. Cleared, best '+PROG.done[sel.id]+'.':''):'Pick a destination on the map.';
+  screen(w.menuTitle||w.name,details);
   let h='<svg viewBox="0 0 160 100" role="group" aria-label="World map">';
   w.nodes.forEach(n=>nbrs(n).forEach(m=>{if(n.id<m.id){const ok=isDone(n)||isDone(m);h+=`<line x1="${n.x}" y1="${n.y}" x2="${m.x}" y2="${m.y}" stroke="${ok?'#46e0d0':'#fff5'}" stroke-width="1.4" ${ok?'':'stroke-dasharray="3 3"'}/>`}}));
   w.nodes.forEach(n=>{
     const g=canGo(n),d=isDone(n),here=n===LV;
-    h+=`<g data-n="${n.id}" ${g?'tabindex="0" role="button" style="cursor:pointer"':'opacity=".4"'} aria-label="${n.name}${g?'':' (locked)'}"><circle cx="${n.x}" cy="${n.y}" r="${n===sel?9:7}" fill="${d?'#ffd23f':'#1b1d3d'}" stroke="${here?'#fff4dc':g?'#46e0d0':'#fff6'}" stroke-width="${here?2.6:1.6}"/>${n.final?`<text x="${n.x}" y="${n.y+2.6}" text-anchor="middle" font-size="7" fill="${d?'#1b1d3d':'#ffd23f'}">&#9733;</text>`:''}<text x="${n.x}" y="${n.y+16}" text-anchor="middle" font-size="5.5" font-weight="700" fill="#fff4dc">${n.name}</text></g>`;
+    h+=`<g data-n="${n.id}" ${g?'tabindex="0" role="button" style="cursor:pointer"':'opacity=".4"'} aria-label="${n.name}"><circle cx="${n.x}" cy="${n.y}" r="${n===sel?9:7}" fill="${d?'#ffd23f':g?'#1b1d3d':'#515b63'}" stroke="${here?'#fff4dc':d?'#ffd23f':g?'#46e0d0':'#7b858c'}" stroke-width="${here?2.6:1.6}"/>${n.final?`<text x="${n.x}" y="${n.y+2.6}" text-anchor="middle" font-size="7" fill="${d?'#1b1d3d':g?'#ffd23f':'#a3adb2'}">&#9733;</text>`:''}<text x="${n.x}" y="${n.y+16}" text-anchor="middle" font-size="5.5" font-weight="700" fill="${g||d?'#fff4dc':'#a3adb2'}">${n.name}</text></g>`;
   });
   menu.innerHTML=h+'</svg>';menu.className='map';mapOpen=true;setMapBackZones(true);
   menu.querySelectorAll('g[data-n]').forEach(g=>{const n=nodeById(g.dataset.n);const f=()=>worldMap(w,n,back);g.onclick=f;g.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();f()}}});
@@ -991,9 +1030,35 @@ function options(back){
   slider('Field of view','fov',60,100,1,v=>v+'\u00b0');
   const c=btn('Invert vertical look: '+(OPT.invert?'On':'Off'),()=>{OPT.invert=!OPT.invert;save();options(back)});
   btn('Developer options: '+(OPT.dev?'On':'Off'),()=>{OPT.dev=!OPT.dev;syncDev();save();options(back)});
+  btn('Export / import save',()=>saveTransfer(back));
   btn('Controls',()=>controls(back));
   btn('Reset all save data',()=>{Store.reset();applyOpts();syncHud();syncDev();options(back)});
   btn('Back',back);
+}
+function saveTransfer(back,message){
+  screen('Save export / import',message||'Export your progress as a JSON file, or import a save file. Import replaces the current save.');
+  btn('Export save file',()=>{
+    try{
+      const blob=new Blob([JSON.stringify(Store.data,null,2)],{type:'application/json'});
+      const url=URL.createObjectURL(blob),a=document.createElement('a');
+      a.href=url;a.download='salt-flats-save.json';document.body.appendChild(a);a.click();a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),1000);saveTransfer(back,'Save exported as salt-flats-save.json.');
+    }catch(e){saveTransfer(back,'Export failed: '+e.message)}
+  },'main');
+  btn('Import save file',()=>{
+    const input=document.createElement('input');input.type='file';input.accept='.json,application/json';input.hidden=true;menu.appendChild(input);
+    input.onchange=async()=>{
+      const file=input.files?.[0];input.remove();if(!file)return;
+      try{
+        if(file.size>1048576)throw new Error('Save file is too large (maximum 1 MB).');
+        const raw=await file.text();
+        if(!confirm('Import this save and replace your current progress?'))return;
+        Store.import(raw);location.reload();
+      }catch(e){saveTransfer(back,'Import failed: '+e.message)}
+    };
+    input.click();
+  });
+  btn('Back',()=>options(back));
 }
 // Compendium: in-game documentation generated from live game data
 const compEl=$('comp');let compTab='basics',compBack=null;
@@ -1008,9 +1073,9 @@ const COMP=[
 <h3>Controls</h3>${tbl(['Action','Key'],[['Move',[B.forward,B.left,B.back,B.right].map(keyName).join(' ')+' or arrow keys'],['Look','Mouse (click the game to capture it)'],['Fire','Mouse click'],['Aim down sights','Hold right mouse button'],...ACTIONS.filter(a=>!['forward','back','left','right'].includes(a[0])).map(([a,l])=>[l,keyName(B[a])]),['Pause, or close a menu','Esc']])}
 <p>Change any keyboard action in Options, then Controls. Mouse click, right mouse, and Esc are fixed.</p>
 <h3>Touch</h3><p>Use the left stick to move, drag the right side of the screen to look, tap JUMP to leap or activate Glide in midair, hold Fire to shoot, and hold AIM to zoom and steady your weapon. The II button pauses. The item buttons at the top left use medkits and Overcharge and open the inventory.</p>`],
-['worlds','Worlds and map',()=>`<h3>How travel works</h3><p>Each world is a map of areas joined by paths. Open the map with ${keyName(B.map)}, from the pause menu, or at the Map pad at Home. Pick an open area and travel there. The first area of a world is always open. Other areas open once a neighboring area is cleared. A world opens when the final area of the world before it is cleared.</p>
+['worlds','Worlds and map',()=>`<h3>How travel works</h3><p>Each world is a map of areas joined by paths. Open the map with ${keyName(B.map)}, from the pause menu, or at the Map pad at Home. Pick an available area and travel there. The first area of a world is always available. Other areas open once a neighboring area is cleared. A world opens when the final area of the world before it is cleared.</p>
 <p>You clear an area by defeating all of its waves. Gates then appear on its edge, one for each path, labeled with where it leads. Walk into a gate to travel. Cleared areas are peaceful when you return. Use Restart area in the pause menu to fight there again.</p>
-${WORLDS.map(w=>`<h3>${w.name}${worldOpen(w)?'':' (locked)'}</h3>${tbl(['Area','Waves','Drone speed','Crates','Status','Best score'],w.nodes.map(n=>[n.name+(n.final?' \u2605':''),n.waves,'x'+n.speed,n.crates,isDone(n)?'Cleared':canGo(n)?'Open':'Locked',PROG.done[n.id]??'-']))}`).join('')}`],
+${WORLDS.map(w=>`<h3>${w.name}</h3>${tbl(['Area','Waves','Drone speed','Crates','Status','Best score'],w.nodes.map(n=>[n.name+(n.final?' \u2605':''),n.waves,'x'+n.speed,n.crates,isDone(n)?'Cleared':canGo(n)?'Open':'-',PROG.done[n.id]??'-']))}`).join('')}`],
 ['combat','Combat',()=>`<h3>Drones</h3><p>A drone has 2 health. It flies straight at you and hurts you on contact (within 1.6 units) for 12 damage, at most once every 0.7 seconds. Armor reduces that damage.</p>
 <h3>Waves</h3><p>Wave N brings 3 + 2N drones. Drone speed starts at 2.4, rises 0.3 per wave, varies a little at random, and is then multiplied by the area's drone speed in the Worlds table.</p>
 <h3>Cover</h3><p>Crates and walls block movement and shots, for you and for drones.</p>
