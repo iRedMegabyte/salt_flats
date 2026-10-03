@@ -197,6 +197,7 @@ const flash=new THREE.PointLight(0xffd23f,0,8);flash.position.set(0,0,-1);camera
 // State
 const P={x:0,z:0,yaw:0,pitch:0,hp:100};
 let state='menu',score=0,wave=0,fireCd=0,flashT=0,hurtCd=0,bob=0;
+let gameTime=0,lastDamageAt=0,lastSpectreHeal=0;
 const enemies=[],bits=[];
 const eGeo=new THREE.OctahedronGeometry(.7,0);
 const eMat=new THREE.MeshLambertMaterial({color:0xffd23f,emissive:0x664400});
@@ -310,7 +311,8 @@ const ITEMS={
  greaves:{name:'Salt Greaves',slot:'legs',armor:2,speed:.05},boots:{name:'Runner Boots',slot:'feet',armor:1,speed:.1},
  core:{name:'Vital Core',slot:'artifact',hp:25,desc:'A warm, humming relic.'},
  spark:{name:'Spark Drone',slot:'companion',cdmg:1,iv:1.2,range:20,col:0x46e0d0},
- guard:{name:'Guard Drone',slot:'companion',cdmg:2,iv:2.2,range:20,col:0xffd23f}};
+ guard:{name:'Guard Drone',slot:'companion',cdmg:2,iv:2.2,range:20,col:0xffd23f},
+ spectre:{name:'Spectre',slot:'companion',heal:.05,wait:5,interval:1,range:20,col:0x9d7cff,desc:'Heals you in 5% chunks every second after 5 seconds of no damage.'}};
 const GEAR=Object.keys(ITEMS).filter(k=>ITEMS[k].slot&&k!=='blaster');
 const DROP={chance:.45,scrap:.55,medkit:.22,boost:.15}; // gear gets whatever is left
 const PCOL={medkit:0x46e0d0,boost:0xff3d6e,scrap:0xcfcfcf};
@@ -375,7 +377,19 @@ function refreshCompanion(){const c=ITEMS[EQ.companion];compM.visible=!!c;if(c)c
 function companionTick(dt){
   const c=ITEMS[EQ.companion];if(!c)return;compT+=dt;
   compM.position.set(P.x+Math.cos(compT*1.2)*1.6,2.1+Math.sin(compT*2)*.25,P.z+Math.sin(compT*1.2)*1.6);
+  if(c.heal){
+    const sinceDamage=gameTime-lastDamageAt;
+    const safeFor=Number.isFinite(c.wait)?c.wait:5;
+    const interval=Number.isFinite(c.interval)?c.interval:1;
+    if(P.hp<maxHp() && sinceDamage>=safeFor && gameTime-lastSpectreHeal>=interval){
+      const chunk=maxHp()*c.heal;
+      setHp(P.hp+chunk);
+      lastSpectreHeal=gameTime;
+      beep(660,.08,'sine',.04);
+    }
+  }
   compCd-=dt;if(compCd>0||inHome)return;
+  if(!c.cdmg)return;
   let best=null,bd=c.range;for(const e of enemies){const d=Math.hypot(e.position.x-P.x,e.position.z-P.z);if(d<bd){bd=d;best=e}}
   if(best){compCd=c.iv;hurt(best,c.cdmg);beep(900,.06,'triangle',.03)}
 }
@@ -430,6 +444,7 @@ function info(id){
   const t=ITEMS[id],p=[];
   if(t.dmg)p.push('Damage '+t.dmg);if(t.rate)p.push((1/t.rate).toFixed(1)+' shots/s');if(t.armor)p.push('Armor +'+t.armor);
   if(t.hp)p.push('Max health +'+t.hp);if(t.speed)p.push('Speed +'+Math.round(t.speed*100)+'%');if(t.cdmg)p.push('Assist '+t.cdmg+' dmg every '+t.iv+'s');
+  if(t.heal)p.push('Heals '+Math.round(t.heal*100)+'% max HP every '+t.interval+'s after '+t.wait+'s of no damage');
   return (t.desc?t.desc+' ':'')+p.join(', ');
 }
 function cell(a,k,label,id,extra,sel){return `<button class="cell ${id?'':'empty'} ${sel?'sel':''}" data-a="${a}" data-k="${k}"><small>${label}</small>${id?ITEMS[id].name:'Empty'}${extra||''}</button>`}
@@ -596,8 +611,8 @@ ${tbl(['Weapon','Damage','Shots/s','With Overcharge','Damage/s','Hits to down a 
 ${tbl(['Slot','Item','Armor','Other bonus','Status'],ofKind(t=>ARMOR_SLOTS.includes(t.slot)).map(k=>{const t=ITEMS[k];return[SLOTLBL[t.slot],t.name,t.armor||0,[t.hp&&'+'+t.hp+' max health',t.speed&&'+'+Math.round(t.speed*100)+'% speed'].filter(Boolean).join(', ')||'-',status(k)]}))}
 <h3>How armor works</h3><p>Damage reduction = armor / (armor + 40). 10 armor cuts damage by 20%, 20 by 33%, and 40 by 50%. Each point is worth a little less than the last, so you can never become immune. The best armor currently available totals ${ARMOR_SLOTS.reduce((t,sl)=>t+Math.max(0,...ofKind(i=>i.slot===sl).map(k=>ITEMS[k].armor||0)),0)}.</p>
 <p>Speed bonuses multiply both walking and sprinting. Max health bonuses raise your health cap above 100.</p>`],
-['companions','Companions',()=>`<h3>How they work</h3><p>You can bring one companion. It orbits you and automatically shoots the nearest drone within its range, then waits before shooting again. It stays idle at Home.</p>
-${tbl(['Companion','Damage','Every','Range','Damage/s','Status'],ofKind(t=>t.slot==='companion').map(k=>{const t=ITEMS[k];return[t.name,t.cdmg,t.iv+'s',t.range,r1(t.cdmg/t.iv),status(k)]}))}
+['companions','Companions',()=>`<h3>How they work</h3><p>You can bring one companion. It orbits you and either shoots the nearest drone if it has an attack, or heals you if it is a support companion. Support companions wait for a safe window before restoring health. It stays idle at Home.</p>
+${tbl(['Companion','Output','Every','Range','Rate','Status'],ofKind(t=>t.slot==='companion').map(k=>{const t=ITEMS[k];if(t.heal){return [t.name,Math.round(t.heal*100)+'% max HP',t.interval+'s',t.range+'m','5%/s after '+t.wait+'s safe',status(k)]}return [t.name,t.cdmg+' dmg',t.iv+'s',t.range,r1(t.cdmg/t.iv),status(k)]}))}
 <p>Companions are not affected by Overcharge. They drop from drones like other gear.</p>`],
 ['stats','Stats explained',()=>`${tbl(['Stat','Meaning'],[['Health','100 plus any max health bonuses. Medkits restore 35. Health refills when you arrive Home.'],['Armor','Total armor from equipped pieces, converted to damage reduction as described under Armor.'],['Move speed','6 walking and 9 sprinting, multiplied by any speed bonuses.'],['Weapon damage','Health removed from a drone per hit. Drones have 2 health.'],['Fire rate','Shots per second of your active weapon, doubled by Overcharge.'],['Overcharge','Lasts 8 seconds after use.'],['Companion','Damage and delay of your companion, if any.'],['Drones downed','Lifetime total across all runs.'],['Areas cleared','Areas you have cleared out of all areas in every world.'],['Scrap','Currency, capped at '+SCRAP_CAP.toLocaleString()+'.'],['Slots','Backpack slots in use. Each stack holds up to 999.']])}
 <h3>Saving</h3><p>Progress, options, bindings, inventory and equipment save automatically in this browser. Reset all save data in Options clears everything.</p>`],
@@ -633,7 +648,7 @@ function enterHome(){
   inHome=true;areaClear=true;padHot=null;homeGroup.visible=true;gun.visible=false;
   gates.splice(0).forEach(g=>scene.remove(g.m));buildCrates(0);boxes.push(...HOME_BOXES);
   scene.background.setHex(0x2e3a4a);scene.fog.color.setHex(0x9a8a7a);
-  enemies.splice(0).forEach(m=>scene.remove(m));leavePickups();boostT=0;
+  enemies.splice(0).forEach(m=>scene.remove(m));leavePickups();boostT=0;lastDamageAt=gameTime;lastSpectreHeal=gameTime;
   setHp(maxHp());P.x=0;P.z=10;P.yaw=P.pitch=0;camera.position.set(0,1.7,10);camera.rotation.set(0,0,0);
   $('lv').textContent='Home';$('wv').textContent='Safe';$('dr').textContent=0;syncHud();save();
 }
@@ -663,7 +678,7 @@ function enterArea(n,from,force){
   areaClear=isDone(n)&&!force;
   buildCrates(n.crates,nbrs(n).map(m=>gatePos(n,m)));
   scene.background.setHex(n.sky);scene.fog.color.setHex(n.fog);
-  enemies.splice(0).forEach(m=>scene.remove(m));leavePickups();boostT=0;
+  enemies.splice(0).forEach(m=>scene.remove(m));leavePickups();boostT=0;lastDamageAt=gameTime;lastSpectreHeal=gameTime;
   Store.data.stats.runs++;P.x=P.z=0;P.yaw=P.pitch=0;
   if(from){const g=gatePos(n,from);P.x=g.x*.8;P.z=g.z*.8;P.yaw=Math.atan2(g.x,g.z)}
   else{setHp(maxHp());score=0;$('sc').textContent=0}
@@ -723,7 +738,7 @@ function tick(){
       e.userData.ph+=dt*3;e.position.y=1.3+Math.sin(e.userData.ph)*.25;e.rotation.y+=dt*2;
       if(e.userData.hf>0){e.userData.hf-=dt;if(e.userData.hf<=0)e.material.emissive.setHex(0x664400)}
       if(d<1.6&&hurtCd<=0){
-        hurtCd=.7;P.hp-=12*(1-armorRed());hudHp();
+        hurtCd=.7;P.hp-=12*(1-armorRed());lastDamageAt=gameTime;hudHp();
         $('vig').style.opacity=.9;setTimeout(()=>$('vig').style.opacity=0,200);beep(110,.2,'sawtooth',.1);
         if(P.hp<=0){over()}
       }
@@ -743,6 +758,7 @@ function tick(){
     $('dr').textContent=enemies.length;
     if(state==='play'&&!areaClear&&!enemies.length){if(wave>=LV.waves)complete();else spawnWave()}
   }
+  gameTime += dt;
   for(let i=bits.length-1;i>=0;i--){
     const b=bits[i];b.t-=dt;b.v.y-=14*dt;b.m.position.addScaledVector(b.v,dt);
     if(b.t<=0){scene.remove(b.m);bits.splice(i,1)}
