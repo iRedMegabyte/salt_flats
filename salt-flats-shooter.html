@@ -15,8 +15,10 @@ canvas{display:block;position:fixed;inset:0;width:100%;height:100%}
 #hp{position:absolute;left:50%;top:calc(env(safe-area-inset-top,0px) + 14px);transform:translateX(-50%);width:min(440px,calc(100vw - 36px));height:24px;background:#0009;border:2px solid #fff8;border-radius:6px;overflow:hidden;box-shadow:0 2px 8px #0008}
 #hpf{height:100%;width:100%;background:var(--cool);transition:width .15s}
 #cross{position:absolute;left:50%;top:50%;width:22px;height:22px;margin:-11px;border:2px solid var(--ink);border-radius:50%;opacity:.8}
-#cross.aim{width:12px;height:12px;margin:-6px;border-width:1px;opacity:1}
-#cross.hit{border-color:var(--hot);transform:scale(1.5)}
+#cross.aim{display:none}
+#cross.enemy{border-color:var(--bad);box-shadow:0 0 8px var(--bad)}
+#cross.friendly{border-color:#58a6ff;box-shadow:0 0 8px #58a6ff}
+#cross.hit{border-color:var(--hot);box-shadow:0 0 8px var(--hot);transform:scale(1.5)}
 #cross{transition:transform .08s,border-color .08s}
 #vig{position:absolute;inset:0;background:radial-gradient(transparent 45%,var(--bad));opacity:0;transition:opacity .25s}
 #hudData{display:none}
@@ -50,11 +52,12 @@ canvas{display:block;position:fixed;inset:0;width:100%;height:100%}
 #quick.on{display:flex}
 #quick button{pointer-events:auto;font:inherit;font-size:13px;font-weight:700;color:var(--ink);background:#0007;border:1px solid #fff6;border-radius:8px;padding:6px 10px}
 #toast{position:absolute;left:50%;bottom:22%;transform:translateX(-50%);opacity:0;transition:opacity .25s;background:#0008;padding:8px 14px;border-radius:8px;font-weight:700}
-#menu.map{width:min(700px,calc(100% - clamp(104px,20vw,300px)));max-height:76vh}
+#menu.map{width:min(700px,calc(100% - clamp(104px,21vw,400px)));max-height:76vh}
 #menu.map svg{width:100%;height:auto;margin-bottom:4px}
 #menu.map g:focus-visible{outline:none}
 #menu.map g:focus-visible circle{stroke:#fff4dc}
-#map-back-left,#map-back-right{display:none;position:fixed;top:0;bottom:0;width:clamp(52px,10vw,150px);z-index:6;align-items:center;justify-content:center;border:0;border-radius:0;color:transparent;font-size:0;cursor:pointer;touch-action:manipulation}
+#map-back-left,#map-back-right{display:none;position:fixed;top:0;bottom:0;width:clamp(52px,10.5vw,200px);z-index:6;align-items:center;justify-content:center;border:0;border-radius:0;padding:0;color:transparent;font-size:0;line-height:0;text-indent:-100vw;appearance:none;-webkit-appearance:none;overflow:hidden;cursor:pointer;touch-action:manipulation}
+#map-back-left::before,#map-back-left::after,#map-back-right::before,#map-back-right::after{content:none}
 #map-back-left{left:0;background:linear-gradient(90deg,#000c 0%,#0008 45%,transparent 100%)}
 #map-back-right{right:0;background:linear-gradient(270deg,#000c 0%,#0008 45%,transparent 100%)}
 #map-back-left:not([hidden]),#map-back-right:not([hidden]){display:flex}
@@ -430,6 +433,18 @@ function updateAim(dt){
   gun.position.y+=(target[1]-gun.position.y)*blend;
   gun.position.z+=(target[2]-gun.position.z)*blend;
   aimEl.classList.toggle('on',aiming);aimEl.setAttribute('aria-pressed',String(aiming));$('cross').classList.toggle('aim',aiming);
+}
+function updateReticle(){
+  const cross=$('cross');
+  if(state!=='play'||inHome){cross.classList.remove('enemy','friendly');return}
+  camera.updateMatrixWorld();
+  enemies.forEach(enemy=>enemy.updateMatrixWorld());
+  if(compM.visible)compM.updateMatrixWorld();
+  raycaster.far=80;raycaster.setFromCamera({x:0,y:0},camera);
+  const targets=compM.visible?enemies.concat(compM):enemies;
+  const target=raycaster.intersectObjects(targets,false)[0]?.object;
+  cross.classList.toggle('enemy',!!target&&target.userData.hp!==undefined);
+  cross.classList.toggle('friendly',target===compM);
 }
 addEventListener('keydown',onKey);
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&state==='play')pause()});
@@ -1040,7 +1055,7 @@ function enterArea(n,from,force){
 }
 function resume(){state='play';ov.style.display='none';$('pb').classList.add('on');$('quick').classList.add('on');refreshQuick();if(!isTouch)renderer.domElement.requestPointerLock()}
 function pause(){
-  state='paused';release();screen('Paused',inHome?'Home. Scrap: '+WAL.scrap+'.':LV.name+', '+LV.w.name+'. Score '+score+'.');
+  state='paused';release();screen('Paused',inHome?'Home.':LV.name+', '+LV.w.name+'. Score '+score+'.');
   btn('Resume',resume,'main');btn('Map',()=>worldMap(null,null,pause));if(!inHome)btn('Restart area',()=>enterArea(LV,null,true));
   btn('Inventory',()=>inventory(pause));btn('Compendium',()=>compendium(pause));btn('Options',()=>options(pause));btn('Return home',mainMenu);
 }
@@ -1193,6 +1208,7 @@ function tick(){
   }
   updateAim(dt);
   syncGunModel();
+  updateReticle();
   renderer.render(scene,camera);
 }
 camera.position.set(0,1.7,0);
